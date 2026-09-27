@@ -296,7 +296,9 @@ browserscale run <session-id> -e "return (await browser.getPages())[0].url"
 browserscale run <session-id> -            # read the script from stdin
 ```
 
-The script does not run in the page. It runs in the browser process itself, with a `browser` object giving it the same operations the SDKs expose — but as local calls rather than network round trips. A loop that polls for a selector or walks a paginated list costs microseconds per step there instead of tens of milliseconds, which is the whole reason to put it there: the same script driven from your terminal would spend all its time waiting on the wire.
+The script does not run in the page. It runs beside the browser in an isolate of its own and reaches the document through the engine: a cross-origin `<iframe>` is read as plain `contentDocument` with no frame ids anywhere, values come back as live objects you can assign to rather than snapshots, an element can be handed straight to `browser.click`, and the page sees nothing injected. Steps cost microseconds instead of network round trips, so loops are affordable.
+
+A guide for it is still to come. Until then, the examples above and `browserscale run -h`.
 
 **The log streams.** Lines appear on stdout as the script prints them, not in one block when it finishes — so a script that runs for a minute is something you can watch, and a script that hangs shows you where. The return value follows the log on the same stream once the script ends.
 

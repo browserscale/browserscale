@@ -22,12 +22,14 @@ func runRun(args []string) error {
 
 Runs a JavaScript file inside a rented browser and waits for it to finish.
 
-The script does not run in the page. It runs in the browser process itself, with a
-`+"`browser`"+` object giving it the same operations the SDKs expose — but as local
-calls rather than network round trips, so a loop that polls or walks a list costs
-microseconds per step instead of tens of milliseconds. That is the point of
-running it there: the same script driven from here would spend all its time
-waiting on the wire.
+The script does not run in the page. It runs beside the browser in an isolate of
+its own and reaches the document through the engine: a cross-origin iframe is
+read as plain `+"`contentDocument`"+` with no frame ids anywhere, values come back as live
+objects you can assign to rather than snapshots, an element can be handed
+straight to `+"`browser.click`"+`, and the page sees nothing injected. Steps cost
+microseconds instead of network round trips, so loops are affordable.
+
+A guide for it is still to come.
 
 The log streams to stdout as the script produces it, rather than arriving in one
 block when it ends — a script that takes a minute is something you can watch. The

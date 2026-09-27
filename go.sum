@@ -1,5 +1,5 @@
-github.com/browserscale/browserscale-go v1.7.0 h1:p3BpGsT+/180Njnlm1+ghnyK6X6fRPWeodFDjc+fV0Y=
-github.com/browserscale/browserscale-go v1.7.0/go.mod h1:Nie6J6gbZoNEbK2eILpjZNWLKpZG2xMWfuJpNoreMhA=
+github.com/browserscale/browserscale-go v1.7.1 h1:miHc9Eq/amxEyGk78TDLchO1kXAHmh3Aij/3oR6A2Bw=
+github.com/browserscale/browserscale-go v1.7.1/go.mod h1:Nie6J6gbZoNEbK2eILpjZNWLKpZG2xMWfuJpNoreMhA=
 github.com/go-logr/logr v1.4.2 h1:6pFjapn8bFcIbiKo3XT4j/BhANplGihG6tvd+8rYgrY=
 github.com/go-logr/logr v1.4.2/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
 github.com/go-logr/stdr v1.2.2 h1:hSWxHoqTgW2S2qGc0LTAI563KZ5YKYRhT3MFKZMbjag=

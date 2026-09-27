@@ -2,7 +2,7 @@ module github.com/browserscale/browserscale
 
 go 1.25.0
 
-require github.com/browserscale/browserscale-go v1.7.0
+require github.com/browserscale/browserscale-go v1.7.1
 
 require (
 	golang.org/x/net v0.31.0 // indirect

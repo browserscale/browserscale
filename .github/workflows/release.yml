@@ -1,0 +1,58 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  # npm provenance signs the packages against this workflow run.
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # GoReleaser builds the changelog from history, so a shallow clone
+          # is not enough.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          check-latest: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # Builds every target, uploads the GitHub release, and pushes the
+      # Homebrew cask to the tap. `go install` needs none of this.
+      - name: GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The default token cannot write to another repository.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Stage npm packages
+        run: node scripts/build-npm.mjs --version "${GITHUB_REF_NAME#v}" --dist dist --out dist/npm
+
+      # Platform packages go first: the wrapper pins them exactly, so
+      # publishing it first would leave a window where installs fail.
+      - name: Publish npm packages
+        run: |
+          set -euo pipefail
+          for pkg in dist/npm/@browserscale/*; do
+            npm publish "$pkg" --access public --provenance
+          done
+          npm publish dist/npm/browserscale --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

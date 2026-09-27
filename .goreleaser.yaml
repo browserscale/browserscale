@@ -1,0 +1,105 @@
+# Release pipeline for the three install channels. `go install` needs nothing
+# from this file; Homebrew and npm both consume the binaries built here.
+#
+# Local dry run (no tag, no upload, nothing published):
+#   goreleaser release --snapshot --clean
+version: 2
+
+project_name: browserscale
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: browserscale
+    main: .
+    binary: browserscale
+    env:
+      # A static binary keeps the Linux archives working on musl (Alpine) as
+      # well as glibc, which matters because npm ships one artifact per arch.
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/browserscale/browserscale/internal/cli.version={{ .Version }}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: browserscale
+    ids:
+      - browserscale
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+# Casks (not formulas) are the supported way to ship a prebuilt binary through
+# Homebrew since GoReleaser v2.10.
+#
+# `brew tap browserscale/tap` resolves by convention to the GitHub repository
+# browserscale/homebrew-tap, which has to exist before the first release.
+# HOMEBREW_TAP_TOKEN needs write access to it: the workflow's default
+# GITHUB_TOKEN cannot write to another repository.
+#
+# Casks are macOS-only. GoReleaser writes on_linux blocks anyway, but brew
+# refuses casks there, so Linux users take npm or `go install`.
+homebrew_casks:
+  - name: browserscale
+    ids:
+      - browserscale
+    repository:
+      owner: browserscale
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://browserscale.cloud"
+    description: "The command line for browserscale.cloud"
+    license: MIT
+    hooks:
+      post:
+        # The binaries are not signed or notarized, so macOS would otherwise
+        # refuse to run them ("browserscale is damaged"). Dropping the
+        # quarantine bit is the documented workaround; replace this with real
+        # signing once there is an Apple Developer account.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/browserscale"]
+          end
+
+release:
+  footer: |
+    ## Install
+
+    ```bash
+    brew install browserscale/tap/browserscale   # macOS
+    npm i -g browserscale                        # any platform with Node
+    go install github.com/browserscale/browserscale@{{ .Tag }}
+    ```

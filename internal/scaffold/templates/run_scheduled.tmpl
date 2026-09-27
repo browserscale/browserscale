@@ -1,0 +1,46 @@
+package main
+
+import (
+	"context"
+	"time"
+
+	"github.com/browserscale/browserscale-kit/logger"
+	"github.com/browserscale/browserscale-kit/module"
+)
+
+// Run executes the task immediately, then repeats every IntervalSeconds
+// until ctx is cancelled (Ctrl-C / SIGTERM). Edit freely — it's your code.
+func (m *Module) Run(ctx context.Context, env module.Env) error {
+	l := logger.NewLogger("[run]", env.Logger)
+
+	if err := m.loadProxies(env); err != nil {
+		return err
+	}
+
+	tick := func() {
+		if err := m.runOnce(ctx); err != nil {
+			l.Error("run:", err)
+		}
+	}
+	tick()
+
+	t := time.NewTicker(time.Duration(m.cfg.IntervalSeconds) * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+			tick()
+		}
+	}
+}
+
+func (m *Module) runOnce(ctx context.Context) error {
+	browser, err := m.rent(ctx)
+	if err != nil {
+		return err
+	}
+	defer browser.StopBrowser(ctx)
+	return m.doTask(ctx, browser)
+}

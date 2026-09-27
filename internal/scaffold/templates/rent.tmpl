@@ -1,0 +1,90 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"strings"
+	"time"
+
+	browserscale "github.com/browserscale/browserscale-go"
+	"github.com/browserscale/browserscale-kit/module"
+	"github.com/browserscale/browserscale-kit/proxy"
+)
+
+// defaultRentSeconds is how long each rented browser is leased for. Callers
+// pass it into rentBrowser, so different flows can choose different leases.
+const defaultRentSeconds = 300
+
+// loadProxies loads the configured proxy list into m.pool. Every lifecycle
+// runs proxied — call this once at the top of Run, before any rent. It fails
+// fast when the file has no parseable proxies so a misconfigured run stops
+// here instead of leaking a direct connection.
+func (m *Module) loadProxies(env module.Env) error {
+	pool, err := proxy.LoadPool(filepath.Join(env.FilesDirectory, m.cfg.ProxiesFile))
+	if err != nil {
+		return err
+	}
+	if pool.Len() == 0 {
+		return errors.New("no parseable proxies in " + m.cfg.ProxiesFile)
+	}
+	m.pool = pool
+	return nil
+}
+
+// rent rents a browser routed through a random proxy from the pool. This is
+// the call your run.go uses for every unit of work; loadProxies must have run
+// first (Run does that).
+func (m *Module) rent(ctx context.Context) (*browserscale.CloudBrowser, error) {
+	p, ok := m.pool.Random()
+	if !ok {
+		return nil, errors.New("proxy pool is empty")
+	}
+	return rentBrowser(ctx, m.cfg.CloudKey, defaultRentSeconds, p)
+}
+
+// rentBrowser rents a cloud browser for rentSeconds through proxy p and retries
+// transient failures with per-cause backoff. This is boilerplate you rarely
+// need to touch — the interesting logic lives in the named flow files. A dead
+// proxy (PROXY_CONNECTION_FAILED) is returned rather than retried, so the
+// caller can move on to the next unit of work (which draws a fresh proxy).
+//
+// Bare NewBrowserConfig + proxy is enough: the server matches country and
+// timezone to the proxy exit IP automatically (same as MCP rent with those
+// fields left empty). Only chain WithCountryCode / WithTimezone when you
+// intentionally override that — wrong overrides fight the proxy geo and often
+// look like "manual rent works, code gets 403".
+func rentBrowser(ctx context.Context, cloudKey string, rentSeconds int, p proxy.Proxy) (*browserscale.CloudBrowser, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		bc := browserscale.NewBrowserConfig(cloudKey, rentSeconds, p.Host, p.Port, p.Username, p.Password)
+
+		browser, err := browserscale.RentBrowser(ctx, bc)
+		if err == nil {
+			return browser, nil
+		}
+
+		switch {
+		case strings.Contains(err.Error(), "INVALID_API_KEY"):
+			// Not transient — no point retrying.
+			return nil, err
+		case strings.Contains(err.Error(), "PROXY_CONNECTION_FAILED"):
+			// The proxy is dead — bubble up so the caller can move on with a
+			// fresh one instead of hammering a broken endpoint.
+			return nil, err
+		case strings.Contains(err.Error(), "NO_CAPACITY_AVAILABLE"):
+			time.Sleep(2 * time.Second)
+		case strings.Contains(err.Error(), "INSUFFICIENT_CREDITS"):
+			time.Sleep(10 * time.Second)
+		case strings.Contains(err.Error(), "SESSION_LIMIT_REACHED"):
+			time.Sleep(10 * time.Second)
+		default:
+			time.Sleep(5 * time.Second)
+		}
+	}
+}

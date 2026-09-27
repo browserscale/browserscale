@@ -1,0 +1,43 @@
+{
+  "name": "browserscale",
+  "version": "0.0.0-dev",
+  "private": true,
+  "scripts": {
+    "prepublishOnly": "node -e \"console.error('browserscale: this is the source template, not a publishable package. Run scripts/build-npm.mjs and publish dist/npm/browserscale instead.'); process.exit(1)\""
+  },
+  "description": "The command line for browserscale.cloud — scaffold and run cloud browser automation modules",
+  "keywords": [
+    "browserscale",
+    "browser-automation",
+    "cli",
+    "cdp",
+    "scraping"
+  ],
+  "homepage": "https://browserscale.cloud",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/browserscale/browserscale.git"
+  },
+  "bugs": {
+    "url": "https://github.com/browserscale/browserscale/issues"
+  },
+  "license": "MIT",
+  "bin": {
+    "browserscale": "bin/browserscale.js"
+  },
+  "files": [
+    "bin/browserscale.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "preferGlobal": true,
+  "optionalDependencies": {
+    "@browserscale/cli-darwin-arm64": "0.0.0-dev",
+    "@browserscale/cli-darwin-x64": "0.0.0-dev",
+    "@browserscale/cli-linux-arm64": "0.0.0-dev",
+    "@browserscale/cli-linux-x64": "0.0.0-dev",
+    "@browserscale/cli-win32-arm64": "0.0.0-dev",
+    "@browserscale/cli-win32-x64": "0.0.0-dev"
+  }
+}

@@ -1,0 +1,150 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/browserscale/browserscale-kit/form"
+	"github.com/browserscale/browserscale-kit/input"
+	"github.com/browserscale/browserscale-kit/mail"
+	"github.com/browserscale/browserscale-kit/module"
+	"github.com/browserscale/browserscale-kit/proxy"
+)
+
+// Config is this module's typed configuration. It is bound to the form in
+// Schema() and edited through the configurator TUI, then persisted as
+// data/config.json.
+type Config struct {
+	CloudKey    string `json:"cloudKey"`
+	AccountsCSV string `json:"accountsFile"`
+	ProxiesFile string `json:"proxiesFile"`
+
+	// Catch-all mailbox that receives the playground verification codes. One
+	// inbox per module: every account is a distinct address on this domain,
+	// but they all land in this one mailbox (a "catch-all"), which is why we
+	// filter each code by recipient + timestamp at fetch time.
+	ImapHost string `json:"imapHost"`
+	ImapPort int    `json:"imapPort"`
+	ImapUser string `json:"imapUser"`
+	ImapPass string `json:"imapPass"`
+{{- if eq .Threading "configurable"}}
+
+	Threads int `json:"threads"`
+{{- end}}
+}
+
+// Module is the automation unit. It implements module.Module: the harness
+// calls Schema() to configure it, then Run() to execute it. The runtime
+// fields below are wired once in Run and shared read-only by the workers.
+type Module struct {
+	cfg    *Config
+	schema *form.Schema
+
+	pool    *proxy.Pool       // rotating proxies; nil when none configured
+	fetcher *mail.CodeFetcher // one kept-alive IMAP connection, shared by workers
+}
+
+// Name is the routing key / store namespace. Version is free-form semver.
+func (m *Module) Name() string    { return "{{.Name}}" }
+func (m *Module) Version() string { return "0.1.0" }
+
+// Schema builds the config form once and memoizes it. Returning the same
+// instance on every call is required so the configurator's edits stick.
+func (m *Module) Schema() *form.Schema {
+	if m.schema != nil {
+		return m.schema
+	}
+	m.cfg = &Config{}
+	f := form.New(m.Name(), "{{.Name}}", m.cfg)
+
+	f.String("cloudKey", &m.cfg.CloudKey).
+		Label("Browserscale API key").
+		Help("Your browserscale.cloud key (sk_...).").
+		Required()
+
+	// The configurator verifies the picked file before it saves the config:
+	// it must parse as CSV and every data row must carry all five columns.
+	// This is the "verify" step — bad input is caught before the run starts.
+	f.File("accountsFile", &m.cfg.AccountsCSV).
+		Label("Accounts CSV").
+		Help("CSV with header email,firstname,lastname,password,country — one account per row. Put the file under data/.").
+		Tag(form.TagLines).
+		Default("accounts.csv").
+		ValidateFile(func(path string) error {
+			rows, err := input.CSV(path)
+			if err != nil {
+				return err
+			}
+			n := 0
+			for i, r := range rows {
+				if len(r) == 0 {
+					continue
+				}
+				if i == 0 && strings.EqualFold(strings.TrimSpace(r[0]), "email") {
+					continue // header row
+				}
+				if len(r) < 5 {
+					return fmt.Errorf("row %d: need email,firstname,lastname,password,country", i+1)
+				}
+				n++
+			}
+			if n == 0 {
+				return errors.New("no account rows found")
+			}
+			return nil
+		}).
+		Required()
+
+	// Every run is proxied. TagProxies makes the configurator reject a file
+	// with no parseable proxies before the run starts.
+	f.File("proxiesFile", &m.cfg.ProxiesFile).
+		Label("Proxies").
+		Help("One proxy per line: host:port[:user:pass]. Put the file under data/.").
+		Tag(form.TagProxies).
+		Default("proxies.txt").
+		Required()
+
+	f.String("imapHost", &m.cfg.ImapHost).
+		Label("IMAP host").
+		Help("Catch-all mailbox host that receives the verification codes.").
+		Required()
+	f.Int("imapPort", &m.cfg.ImapPort).
+		Label("IMAP port").
+		Default(993).Min(1).Max(65535).
+		Required()
+	f.String("imapUser", &m.cfg.ImapUser).
+		Label("IMAP username").
+		Required()
+	f.String("imapPass", &m.cfg.ImapPass).
+		Label("IMAP password").
+		Required()
+{{- if eq .Threading "configurable"}}
+
+	f.Int("threads", &m.cfg.Threads).
+		Label("Threads").
+		Help("Concurrent workers.").
+		Default(1).Min(1).Max(64).
+		Required()
+{{- end}}
+
+	m.schema = f.Build()
+	return m.schema
+}
+
+// threads is the worker count for this run.
+func (m *Module) threads() int {
+{{- if eq .Threading "single"}}
+	return 1
+{{- else if eq .Threading "fixed"}}
+	return {{.FixedThreads}}
+{{- else}}
+	if m.cfg.Threads < 1 {
+		return 1
+	}
+	return m.cfg.Threads
+{{- end}}
+}
+
+// compile-time check that Module satisfies the interface.
+var _ module.Module = (*Module)(nil)

@@ -1,0 +1,17 @@
+package main
+
+import (
+	"context"
+
+	browserscale "github.com/browserscale/browserscale-go"
+)
+
+// doTask is the lifecycle hook for this one-shot run. Keep it thin: pick which
+// named flow to run and return. The browser work lives in register.go (and
+// later enter.go / login.go / … — one file per flow).
+//
+// Contract: return nil on success, a non-nil error on failure. The browser is
+// already rented (through a proxy from the pool) by Run.
+func (m *Module) doTask(ctx context.Context, browser *browserscale.CloudBrowser) error {
+	return m.register(ctx, browser)
+}

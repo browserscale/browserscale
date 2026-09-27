@@ -1,0 +1,110 @@
+# What every change has to pass. The release itself is in release.yml; this is
+# the part that runs before there is a tag to regret.
+#
+# Two things are checked, because the CLI reaches its users two different ways.
+# `go install` compiles this module from source, so the code has to build against
+# the *published* SDK — there is no workspace here to paper over an unreleased
+# method. npm and Homebrew ship the binaries GoReleaser builds, so that chain is
+# exercised too: a break in it would otherwise surface at tag time, when the
+# version is already public.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    # All three, not just Linux: opening a viewer window and handing a URL to a
+    # browser are per-OS code paths, and each one only compiles on its own
+    # platform.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          check-latest: true
+
+      # A gate, not a formatter: output here means the tree was committed
+      # unformatted, and the fix belongs in the commit rather than in CI.
+      - name: gofmt
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...
+
+      # The one thing `go build` does not prove: that this module installs as a
+      # command. A missing main package or a bad -X path fails here, not in
+      # someone's terminal.
+      - name: go install
+        run: go install .
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # GoReleaser reads git history, so a shallow clone is not enough.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          check-latest: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # --snapshot builds every target and writes the archives, the checksums
+      # and the Homebrew cask, but publishes nothing and needs no tag.
+      - name: GoReleaser (dry run)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+
+      # GoReleaser's own before hook just ran `go mod tidy`, so anything it
+      # changed means the committed module files were stale.
+      - name: go.mod is tidy
+        run: git diff --exit-code go.mod go.sum
+
+      - name: Stage the npm packages
+        run: node scripts/build-npm.mjs --version 0.0.0-ci --dist dist --out dist/npm
+
+      # Installing them is the point. The wrapper finds its binary through
+      # require.resolve, which is the first thing a user meets and the easiest
+      # thing to break without noticing.
+      - name: Install the staged packages and run the CLI
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/npm-smoke"
+          cd "$RUNNER_TEMP/npm-smoke"
+          npm pack "$GITHUB_WORKSPACE/dist/npm/@browserscale/cli-linux-x64"
+          npm pack "$GITHUB_WORKSPACE/dist/npm/browserscale"
+          # Tarballs, not directories: npm links a directory install, and the
+          # launcher then resolves from the source tree, where the platform
+          # package is not a sibling under node_modules. A published install is
+          # always a tarball.
+          npm install -g ./*.tgz
+          browserscale version
+          browserscale help

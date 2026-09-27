@@ -1,0 +1,155 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	browserscale "github.com/browserscale/browserscale-go"
+)
+
+// registrationURL is the public browserscale playground — a deliberately
+// hostile signup fixture used to exercise real anti-automation patterns.
+const registrationURL = "https://browserscale.cloud/playground/registration_flow"
+
+// Mail routing for the playground verification code. The playground always
+// sends from this address with this subject; the 6-digit code sits in a styled
+// <div>. The recipient is the account's own (catch-all) address.
+const (
+	codeFrom    = "admin@browserscale.cloud"
+	codeSubject = "[browserscale Playground] Your test verification code"
+	codeRegex   = `>(\d{6})</div>`
+)
+
+// register is one named browser flow. Ships as a COMPLETE, WORKING example —
+// run the module as-is (with the sample data/accounts.csv + your IMAP
+// catch-all), then replace the body with your own registration. Add further
+// flows as sibling files (enter.go, login.go, …) and dispatch from doTask.
+//
+// The playground stacks the obstacles a real signup throws at you, so this one
+// function demonstrates the primitives you'll actually reach for:
+//   - Reactions        auto-dismiss interstitials the moment they appear
+//   - .InAllFrames()   reach an element inside a cross-origin iframe
+//   - __wrc.shadow(..) pierce a CLOSED shadow root (the submit button)
+//   - SelectByText     drive a native <select>
+//   - mailTime + IMAP  fetch the emailed one-time code (CodeFetcher)
+//   - multi-cond Wait  branch success vs. error on whichever renders first
+func (m *Module) register(ctx context.Context, browser *browserscale.CloudBrowser, acc account) error {
+	// 1. Navigate to the registration page.
+	if _, err := browser.Navigate(ctx, registrationURL, 30_000); err != nil {
+		return err
+	}
+
+	// 2. Arm reactions for the two interstitials that pop over the form. A
+	//    reaction is a one-shot background auto-click: register it once and it
+	//    fires the instant the element appears — no polling, no sleeps.
+	//    The cookie "Accept" lives inside a cross-origin iframe → InAllFrames().
+	if _, err := browser.AddReaction(ctx, browserscale.CSS("#accept-cookies").InAllFrames()); err != nil {
+		return err
+	}
+	//    The newsletter modal appears a few seconds in; dismiss by its close X.
+	if _, err := browser.AddReaction(ctx, browserscale.CSS("#newsletter-close")); err != nil {
+		return err
+	}
+
+	// 3. Wait for the form (readiness gate), then fill it from the CSV row.
+	//    Navigate only waited for commit — Wait for a known landmark before acting.
+	if _, err := browser.Wait(ctx, browserscale.CSS("#email"), browserscale.Timeout(30_000)); err != nil {
+		return err
+	}
+	if _, err := browser.FillWith(ctx, browserscale.CSS("#email"), acc.email,
+		browserscale.FillOpts{ClearFirst: true}); err != nil {
+		return err
+	}
+	if _, err := browser.Fill(ctx, browserscale.CSS("#firstname"), acc.firstName); err != nil {
+		return err
+	}
+	if _, err := browser.Fill(ctx, browserscale.CSS("#lastname"), acc.lastName); err != nil {
+		return err
+	}
+	if _, err := browser.Fill(ctx, browserscale.CSS("#password"), acc.password); err != nil {
+		return err
+	}
+	if _, err := browser.Fill(ctx, browserscale.CSS("#confirm-password"), acc.password); err != nil {
+		return err
+	}
+	if _, err := browser.SelectByText(ctx, browserscale.CSS("#country"), acc.country); err != nil {
+		return err
+	}
+	if _, err := browser.Click(ctx, browserscale.CSS("#terms")); err != nil {
+		return err
+	}
+
+	// 4. Capture the timestamp BEFORE the action that triggers the email, then
+	//    pass it (minus a clock-skew buffer) as `since` so we match the FRESH
+	//    code and never a stale one left in the catch-all mailbox.
+	mailTime := time.Now().UnixMilli()
+
+	// 5. The real submit button lives inside its own CLOSED shadow root. CSS
+	//    can't cross that boundary — target it with a JS-expression locator via
+	//    __wrc.shadow and let the SDK do the real, human-like click.
+	if _, err := browser.Click(ctx, browserscale.JS(
+		`__wrc.shadow(document.querySelector('#submit-host')).querySelector('#real-submit')`)); err != nil {
+		return err
+	}
+
+	// 6. Wait for the code field, fetch the one-time code over IMAP, fill it.
+	if _, err := browser.Wait(ctx, browserscale.CSS("#code"), browserscale.Timeout(30_000)); err != nil {
+		return err
+	}
+	code, err := m.fetcher.FetchCode(
+		ctx,
+		codeFrom,        // from
+		acc.email,       // to — the address the code is delivered to
+		codeSubject,     // subject filter
+		codeRegex,       // one capture group = the code
+		mailTime-60_000, // since: mailTime minus ~60s clock-skew buffer
+		120_000,         // give it up to 2 minutes
+		true,            // delete after fetch so a re-run can't re-match it
+	)
+	if err != nil {
+		return err
+	}
+	if _, err := browser.Fill(ctx, browserscale.CSS("#code"), code); err != nil {
+		return err
+	}
+	if _, err := browser.Click(ctx, browserscale.CSS("#verify-code")); err != nil {
+		return err
+	}
+
+	// 7. Branch on the outcome: whichever element appears first wins.
+	//    On a multi-step site, race every next page you know — and after a
+	//    click that should navigate, include "old page gone" so the previous
+	//    landmark cannot match again:
+	//
+	//      from := … // e.g. pathname before the click
+	//      browser.Click(ctx, …)
+	//      wr, err := browser.Wait(ctx,
+	//          browserscale.CSS("#next-step"),
+	//          browserscale.JS(`location.pathname !== `+strconv.Quote(from)),
+	//          browserscale.Timeout(30_000),
+	//      )
+	//
+	//    If nothing matches, observe and return ErrInspect (see run.go) instead
+	//    of guessing the next click.
+	wr, err := browser.Wait(ctx,
+		browserscale.CSS("#account-id"), // index 0 — registered
+		browserscale.CSS("#form-error"), // index 1 — rejected (bad code, taken, …)
+		browserscale.Timeout(30_000),
+	)
+	if err != nil {
+		if obs, oerr := browser.GetObservation(ctx); oerr == nil {
+			_ = obs // log it while mapping; return ErrInspect so status shows it
+		}
+		return err
+	}
+	switch wr.Index {
+	case 0:
+		return nil
+	case 1:
+		return errors.New("registration rejected")
+	default:
+		return fmt.Errorf("%w: unexpected Wait index %d", ErrInspect, wr.Index)
+	}
+}

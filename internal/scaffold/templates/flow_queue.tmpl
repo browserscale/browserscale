@@ -1,0 +1,18 @@
+package main
+
+import (
+	"context"
+
+	browserscale "github.com/browserscale/browserscale-go"
+)
+
+// doTask is the lifecycle hook called once per CSV row. Keep it thin: pick
+// which named flow to run and return. The browser work lives in register.go
+// (and later enter.go / login.go / … — one file per flow).
+//
+// Contract: return nil on success, a non-nil error on failure. Each worker
+// calls this once per CSV row (acc). The proxy + IMAP connection are already
+// wired on the receiver (m.pool / m.fetcher) by Run.
+func (m *Module) doTask(ctx context.Context, browser *browserscale.CloudBrowser, acc account) error {
+	return m.register(ctx, browser, acc)
+}

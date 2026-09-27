@@ -1,0 +1,20 @@
+package main
+
+import (
+	"log"
+
+	"github.com/browserscale/browserscale-kit/harness"
+	"github.com/browserscale/browserscale-kit/module"
+)
+
+// main hands control to the kit harness: it parses flags, lays out the
+// working directory (./data by default), runs the configurator to edit +
+// save this module's config, opens the persistent store, and then calls
+// Module.Run. Register more modules in the slice to get a picker.
+func main() {
+	if err := harness.Run("{{.Name}}", []module.Module{
+		&Module{},
+	}); err != nil {
+		log.Fatal(err)
+	}
+}

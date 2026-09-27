@@ -1,0 +1,29 @@
+package main
+
+import (
+	"context"
+
+	browserscale "github.com/browserscale/browserscale-go"
+)
+
+// doTask is the lifecycle hook for one unit of work. Keep it thin: pick which
+// named flow to run and return. The browser work lives in task.go (and later
+// register.go / enter.go / login.go / … — one file per flow).
+//
+// Contract: return nil on success, a non-nil error on failure.
+{{- if eq .Kind "repeat"}}
+// In the repeat lifecycle a nil return counts toward the success Amount.
+{{- else if eq .Kind "scheduled"}}
+// In the scheduled lifecycle the error is logged and the next tick still fires.
+{{- else if eq .Kind "continuous"}}
+// In the continuous lifecycle the error is logged and the worker loops again.
+{{- else}}
+// The lifecycle in run.go decides what happens with the returned error.
+{{- end}}
+//
+// This stays a pure browser flow. Need the kit services (Store/Output/Logger/
+// Files)? They live on the env passed to Run in run.go — do that work there,
+// or thread what you need into the named flow.
+func (m *Module) doTask(ctx context.Context, browser *browserscale.CloudBrowser) error {
+	return m.runTask(ctx, browser)
+}

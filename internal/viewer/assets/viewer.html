@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>{{.SessionID}} — browserscale</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #0b0d10;
+    color: #e6e8eb;
+    font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #20242b;
+    flex: none;
+  }
+  .id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #9aa4b2; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; flex: none; }
+  .dot[data-status="connecting"] { background: #d29922; }
+  .dot[data-status="connected"] { background: #3fb950; }
+  .dot[data-status="error"] { background: #f85149; }
+  .spacer { flex: 1; }
+  .hint { color: #6b7280; }
+  button {
+    font: inherit;
+    color: #e6e8eb;
+    background: #171b21;
+    border: 1px solid #2b313a;
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  button:hover { background: #1f242c; }
+
+  /* The container owns keyboard focus: key events are read here and forwarded,
+     so it must be focusable and must not show a focus ring around the video. */
+  #stage {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+    outline: none;
+  }
+  video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+    display: block;
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    padding: 24px;
+    background: rgba(11, 13, 16, .82);
+    color: #9aa4b2;
+  }
+  #overlay[hidden] { display: none; }
+  #overlay strong { display: block; color: #e6e8eb; margin-bottom: 6px; }
+  #stage:focus-visible::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid #2f81f7;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot" data-status="connecting"></span>
+  <span class="id">{{.SessionID}}</span>
+  <span class="spacer"></span>
+  <span class="hint" id="hint">Click the picture to type into it</span>
+  <button id="fullscreen" type="button">Fullscreen</button>
+</header>
+
+<!-- tabindex makes the stage focusable so it can receive key events. -->
+<div id="stage" tabindex="0">
+  <video id="video" autoplay playsinline muted></video>
+  <div id="overlay"><div><strong id="overlay-title">Connecting…</strong><span id="overlay-detail"></span></div></div>
+</div>
+
+<script>
+  // html/template renders these as JSON literals in a script context, quotes
+  // and all, so no hand-rolled escaping is involved.
+  window.__BROWSERSCALE_VIEW = {
+    sessionId: {{.SessionID}},
+    token: {{.Token}},
+    interactive: {{.Interactive}}
+  };
+</script>
+<script type="module" src="viewer.js"></script>
+</body>
+</html>

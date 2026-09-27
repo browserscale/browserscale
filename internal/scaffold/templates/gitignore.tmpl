@@ -1,0 +1,21 @@
+# build output
+/{{.Name}}
+/{{.Name}}.exe
+/.browserscale/
+
+# operator config + store (secrets / local state)
+/data/config.json
+/data/store.db
+/data/store.db-*
+
+# per-run outputs
+/runs/
+
+# keep sample inputs; ignore everything else dropped into data/
+/data/*
+!/data/proxies.txt
+{{- if eq .Kind "queue"}}
+!/data/accounts.csv
+{{- end}}
+
+*.log

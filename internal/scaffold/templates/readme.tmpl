@@ -1,0 +1,105 @@
+# {{.Name}}
+
+A [browserscale.cloud](https://browserscale.cloud) automation module, scaffolded
+with `browserscale init`. Built on the **browserscale-kit** harness (config,
+store, logging) and the **browserscale-go** SDK (cloud browser control).
+
+{{- if or (eq .Kind "queue") (eq .Kind "one-shot")}}
+`register.go` ships with a **complete, working example flow** against the
+browserscale playground — run it first to see the whole shape, then replace
+that body with your own registration. `flow.go` only dispatches to it; add
+further flows as sibling files (`enter.go`, `login.go`, …).
+{{- else}}
+`task.go` ships with a **complete, working example flow** against the
+browserscale playground — run it first to see the whole shape, then replace
+that body with your own task. `flow.go` only dispatches to it; split into
+named flow files (`register.go`, `enter.go`, …) as the module grows.
+{{- end}}
+
+## Run
+
+```bash
+go mod tidy
+go run .
+```
+
+`go run .` opens the configurator: fill in the config (saved to
+`data/config.json`), pick a run name, and the module runs. Outputs land in
+`runs/<name>/`. Next time your saved config is pre-loaded — just press Continue.
+
+**Every run is proxied.** Add at least one proxy to `data/proxies.txt`
+(see the comments in that file for the accepted formats) — the run refuses to
+start without one.
+{{if eq .Kind "queue"}}
+This module registers each account from a **CSV**: a ready-to-run sample lives
+at `data/accounts.csv` (header `email,firstname,lastname,password,country`).
+The configurator verifies the file parses and every row has all five columns
+before saving.
+
+The example flow targets the public
+[playground](https://browserscale.cloud/playground/registration_flow) — a
+deliberately hostile signup fixture (cookie wall in a cross-origin iframe behind
+a closed shadow root, a timed newsletter modal, a submit button in its own
+closed shadow root, an emailed verification code). Besides proxies it needs a
+**catch-all mailbox** (IMAP host/port/user/pass) that receives the codes — each
+row's `email` must be an address on that domain.
+{{else if eq .Kind "one-shot"}}
+The example flow registers a single account against the public
+[playground](https://browserscale.cloud/playground/registration_flow) — a
+deliberately hostile signup fixture (cookie wall in a cross-origin iframe behind
+a closed shadow root, a timed newsletter modal, a submit button in its own
+closed shadow root, an emailed verification code). The account and its
+**catch-all mailbox** (IMAP) are plain consts at the top of `register.go` —
+edit them and run.
+{{end}}
+After `data/config.json` exists, iterate headless:
+
+```bash
+browserscale dev              # rebuild → restart → stream (timestamp under runs/)
+browserscale dev -run nightly # same, fixed runs/nightly/
+```
+
+## Layout
+
+| Path            | What it's for                                                      |
+|-----------------|--------------------------------------------------------------------|
+| `flow.go`       | Thin dispatcher — `doTask()` picks which named flow to run         |
+{{- if or (eq .Kind "queue") (eq .Kind "one-shot")}}
+| `register.go`   | **Your main job** — one named flow (worked playground signup)      |
+{{- else}}
+| `task.go`       | **Your main job** — one named flow (worked playground example)     |
+{{- end}}
+| `module.go`     | Identity + config schema (`Schema()`), edited via the configurator |
+| `run.go`        | The `{{.Kind}}` lifecycle (workers, loop, scheduling) — editable   |
+| `rent.go`       | Proxy loading + rent-with-backoff helper (`loadProxies`, `rent`)   |
+| `main.go`       | Hands off to the kit harness                                       |
+| `AGENTS.md`     | SDK + kit reference and patterns for your code agent               |
+| `data/`         | `config.json`, input files (`proxies.txt`, …), `store.db`          |
+| `runs/<name>/`  | Per-run outputs (`registered.txt`, …)                              |
+
+Add further browser flows as sibling files (`enter.go`, `login.go`, …) — one
+named flow per file — and keep `doTask` as the switchboard.
+
+## Config
+
+The config is defined in `module.go` (`Schema()`), edited in the TUI, and
+saved as **`data/config.json`**. It starts with:
+
+- **Browserscale API key** (required)
+- **Proxies** — a proxy list under `data/` (required; every run is proxied)
+{{- if eq .Kind "queue"}}
+- **Accounts CSV** — `email,firstname,lastname,password,country` per row, under `data/` (verified on save)
+- **IMAP host/port/user/pass** — the catch-all mailbox the codes land in
+{{- end}}
+{{- if eq .Threading "configurable"}}
+- **Threads** — number of concurrent workers
+{{- end}}
+{{- if eq .Kind "repeat"}}
+- **Amount** — successful runs before stopping
+{{- end}}
+{{- if eq .Kind "scheduled"}}
+- **Interval (seconds)** — seconds between runs
+{{- end}}
+
+Add your own fields (input lists, proxies, toggles) by extending `Config` and
+`Schema()`.

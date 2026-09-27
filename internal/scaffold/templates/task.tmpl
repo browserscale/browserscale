@@ -1,0 +1,58 @@
+package main
+
+import (
+	"context"
+	"errors"
+
+	browserscale "github.com/browserscale/browserscale-go"
+)
+
+// runTask is one named browser flow. This is a COMPLETE, WORKING example
+// against the browserscale playground — run the module as-is to watch the
+// whole shape, then replace the body with your own task. Canonical rhythm:
+// navigate → wait → act → branch on the outcome.
+//
+// When the module grows beyond one flow, rename this file to match
+// (register.go / enter.go / …), keep one flow per file, and dispatch from
+// doTask in flow.go.
+func (m *Module) runTask(ctx context.Context, browser *browserscale.CloudBrowser) error {
+	// The value we submit. Swap this for a config field or a real input.
+	value := "hello from " + m.Name()
+
+	// 1. Navigate. The playground echoes back whatever you submit.
+	if _, err := browser.Navigate(ctx, "https://playground.browsercloud.cloud/{{.Name}}", 30000); err != nil {
+		return err
+	}
+
+	// 2. Wait for the form field (visible + position-steady by default).
+	//    Navigate only waited for commit — Wait for a known landmark before acting.
+	if _, err := browser.Wait(ctx, browserscale.CSS("#input"), browserscale.Timeout(15000)); err != nil {
+		return err
+	}
+
+	// 3. Type into it (ClearFirst wipes any pre-filled text).
+	if _, err := browser.FillWith(ctx, browserscale.CSS("#input"), value,
+		browserscale.FillOpts{ClearFirst: true}); err != nil {
+		return err
+	}
+
+	// 4. Submit with a real, human-like click (never el.click() via Evaluate).
+	if _, err := browser.Click(ctx, browserscale.CSS(`button[type="submit"]`)); err != nil {
+		return err
+	}
+
+	// 5. Branch on the outcome: whichever element appears first wins.
+	wr, err := browser.Wait(ctx,
+		browserscale.CSS("#result"), // index 0 — success
+		browserscale.CSS("#error"),  // index 1 — failure
+		browserscale.Timeout(20000),
+	)
+	if err != nil {
+		return err
+	}
+	if wr.Index == 1 {
+		return errors.New("playground reported an error")
+	}
+
+	return nil
+}

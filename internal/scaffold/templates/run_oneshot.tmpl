@@ -1,0 +1,23 @@
+package main
+
+import (
+	"context"
+
+	"github.com/browserscale/browserscale-kit/module"
+)
+
+// Run executes the task once, then returns. Edit freely — it's your code.
+// env (Store/Output/Logger/Files) is available here if your flow needs it.
+func (m *Module) Run(ctx context.Context, env module.Env) error {
+	if err := m.loadProxies(env); err != nil {
+		return err
+	}
+
+	browser, err := m.rent(ctx)
+	if err != nil {
+		return err
+	}
+	defer browser.StopBrowser(ctx)
+
+	return m.doTask(ctx, browser)
+}

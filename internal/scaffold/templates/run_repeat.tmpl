@@ -1,0 +1,64 @@
+package main
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+
+	"github.com/browserscale/browserscale-kit/logger"
+	"github.com/browserscale/browserscale-kit/module"
+)
+
+// Run spawns workers that keep running the task until Amount successful runs
+// have completed, then stops. Edit freely — it's your code.
+func (m *Module) Run(ctx context.Context, env module.Env) error {
+	l := logger.NewLogger("[run]", env.Logger)
+
+	if err := m.loadProxies(env); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var done int64
+	var wg sync.WaitGroup
+	for i := 0; i < m.threads(); i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if atomic.LoadInt64(&done) >= int64(m.cfg.Amount) {
+					cancel()
+					return
+				}
+				if err := m.runOnce(ctx); err != nil {
+					l.Error("worker", id, err)
+					continue
+				}
+				n := atomic.AddInt64(&done, 1)
+				l.Success("worker", id, "success", n, "/", m.cfg.Amount)
+				if n >= int64(m.cfg.Amount) {
+					cancel()
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+	return nil
+}
+
+func (m *Module) runOnce(ctx context.Context) error {
+	browser, err := m.rent(ctx)
+	if err != nil {
+		return err
+	}
+	defer browser.StopBrowser(ctx)
+	return m.doTask(ctx, browser)
+}

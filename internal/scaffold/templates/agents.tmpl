@@ -1,0 +1,726 @@
+# Agent guide — {{.Name}}
+
+You are working inside a **browserscale.cloud** automation module written in Go.
+It implements the `module.Module` interface from **browserscale-kit** and drives
+a cloud browser through **browserscale-go**.
+
+- `flow.go` — thin dispatcher: `doTask(...)` picks which named flow to run.
+  Keep it short. Do **not** dump the whole browser script here.
+{{- if or (eq .Kind "queue") (eq .Kind "one-shot")}}
+- `register.go` — **your main job for now**: one named flow (`register`). Ships
+  with a COMPLETE working playground signup — read it first, it's the fastest
+  way in. Add further flows as sibling files (`enter.go`, `login.go`, …).
+{{- else}}
+- `task.go` — **your main job for now**: one named flow (`runTask`). Ships with
+  a COMPLETE working playground example — read it first. Rename/split into
+  `register.go` / `enter.go` / … as soon as you have more than one flow.
+{{- end}}
+- `module.go` — identity + the config schema in `Schema()` (edited in a TUI).
+- `run.go` — the `{{.Kind}}` lifecycle: `Run(ctx, env)`. Your code — edit freely.
+- `rent.go` — proxy loading + rent-with-backoff. Every run is proxied:
+  `Run` calls `m.loadProxies(env)` once, then `m.rent(ctx)` draws a random
+  proxy from the pool per unit of work. Don't rent without a proxy. Bare
+  rent is enough: country/timezone auto-match the proxy exit IP — do **not**
+  add `WithCountryCode` / `WithTimezone` unless you mean to override that.
+- `main.go` — hands off to `harness.Run` (do not overthink it).
+- `data/` — `config.json` (one config), operator input files (`proxies.txt`,
+  CSVs, …), and `store.db`. Resolve inputs with
+  `filepath.Join(env.FilesDirectory, cfg.SomeFile)`.
+- `runs/<name>/` — per-run outputs via `env.Output(...)`.
+
+### Running (and iterating)
+
+```bash
+go run .                  # interactive once: edit + save data/config.json
+browserscale dev          # preferred while iterating: rebuild → restart → stream
+browserscale dev -run dig # same, fixed runs/dig/ folder (append OK)
+```
+
+`dev` is always headless (needs `data/config.json`). Without `-run` the harness
+creates `runs/<timestamp>/`. Do **not** hand-roll `go build` / Kill /
+`Start-Process` loops and do **not** pass `--` / `-yes` to `dev` — it already
+starts the module non-interactively.
+
+Stdout/stderr are streamed into the terminal; Cursor/Codex read that live
+output. Watch success/retry/inspect/fail lines there (the status line also
+updates the terminal title, which agents usually do not see).
+
+### File layout for browser flows
+
+One named flow per file. `doTask` only dispatches:
+
+```go
+// flow.go — keep this thin
+func (m *Module) doTask(ctx context.Context, browser *browserscale.CloudBrowser{{if eq .Kind "queue"}}, acc account{{end}}) error {
+    // pick the flow from config / CSV / flags as the module grows
+    return m.register(ctx, browser{{if eq .Kind "queue"}}, acc{{end}})
+    // return m.enter(ctx, browser{{if eq .Kind "queue"}}, acc{{end}})
+}
+```
+
+```text
+register.go   →  func (m *Module) register(...)   // signup
+enter.go      →  func (m *Module) enter(...)      // raffle / drop entry
+login.go      →  func (m *Module) login(...)      // session restore
+```
+
+Shared helpers (SMS client, address pool, selectors) get their own files too —
+`sms.go`, `address.go` — not stuffed into a flow. A flow file that grows past
+~200 lines usually wants another split (phase methods on the same file are
+fine; a second *flow* is a second file).
+
+`doTask` / named flows are **pure browser work**: config is on the receiver
+(`m.cfg`). The kit services (`env.Logger`, `env.Store`, `env.Output`,
+`env.FilesDirectory`) live on the `env` passed to `Run` in `run.go` — do
+store/output work there, or thread what you need into the named flow.
+
+This file is the source of truth for both the `browserscale-go` SDK and the
+`browserscale-kit` helpers. It is precise — follow the signatures exactly.
+
+**Before writing browser code:** read
+{{- if or (eq .Kind "queue") (eq .Kind "one-shot")}} `register.go`
+{{- else}} `task.go`
+{{- end}}
+(a complete working example), then keep new flows in their own files.
+**Never invent an SDK method or reach for a Playwright-style helper.** This SDK
+is more capable than it looks — most "there's no primitive for this" problems
+are already solved (JS-expression locators, multi-condition `Wait`, char-by-char
+`Fill`). If a method or signature is not in this file, confirm it exists in the
+docs bundled offline under `docs/` **before** using it — open the specific page
+or grep the folder:
+
+- `docs/api-reference/go.md` — every Go method: signature, params, throws, examples.
+- `docs/guides/*.md` — task guides (locators, waiting, interaction, frames, network, capture, dom-mirror, captchas, …).
+- `docs/README.md` — index of every bundled page.
+
+```
+grep -rin "getobservation\|selectbytext\|waitforanyresponse" docs/
+```
+
+Prefer the bundled docs over guessing; a hallucinated method costs a whole
+build/run cycle to discover.
+
+### Optional: probe a live session (browserscale MCP)
+
+This file + `docs/` are the *build-time* reference (how to write the code). If
+the **browserscale MCP server** is connected, you also have a *live* one: an
+interactive mirror of the SDK for poking a real page and reading back its actual
+state. Its tools map 1:1 onto the methods below — `observe`→`GetObservation`,
+`evaluate`→`Evaluate`, `wait`→`Wait`, `click`/`fill`→`Click`/`Fill`,
+`get_cookies`/… — so anything you confirm live drops **verbatim** into your Go.
+
+There's no fixed sequence — reach for whichever tool answers your current
+question. Two common entry points:
+
+- **Explore an unfamiliar page**: `rent` (or reuse a session) → `navigate` →
+  `wait` for a landmark → `observe` for the lay of the land. Use `evaluate`
+  only to verify a durable css/js target you will reuse, or for probes observe
+  cannot answer — not for url/title/text dumps. `screenshot` when you need to
+  see it; try `click`/`wait` before writing any of it into a named flow file.
+- **Investigate a run that just failed**: don't rent — attach to the broken
+  session itself. Feed its `sessionId` + `grpcUrl` (log both from your code) to
+  any action tool and inspect the live, half-finished state where it died:
+  `screenshot`/`observe` to see where it actually is, `evaluate` to check the
+  assumption the code made that the page didn't hold up.
+
+You pass only `sessionId` (+ `grpcUrl`); the API key rides the client's
+`Authorization` header, never a tool arg. If no MCP is connected, ignore this
+and work from
+{{- if or (eq .Kind "queue") (eq .Kind "one-shot")}} `register.go`
+{{- else}} `task.go`
+{{- end}}
++ `docs/`.
+
+---
+
+## The kit (browserscale-kit)
+
+The harness already wired config + store + logging. Reach for these helpers
+instead of hand-rolling; the kit *helps*, it doesn't dictate.
+
+Import paths: `github.com/browserscale/browserscale-kit/{form,store,input,proxy,mail,logger,module}`.
+Every field referenced in a `Schema()` snippet below must also exist on your
+`Config` struct — add it there first.
+
+**Config — `form`** (in `module.go`): typed, fluent, bound to your `Config`
+struct; edited in the TUI and saved as JSON.
+
+```go
+f.String("cloudKey", &m.cfg.CloudKey).Label("API key").Required()
+f.Int("threads", &m.cfg.Threads).Default(1).Min(1).Max(64)
+f.Bool("headless", &m.cfg.Headless).Default(true)
+f.Select("region", &m.cfg.Region).Option("us", "US").Option("de", "Germany")
+f.File("proxies", &m.cfg.Proxies).Tag(form.TagProxies)          // validated file picker
+f.StringList("countries", &m.cfg.Countries)
+// conditional: only show when another field is set
+f.File("proxies", &m.cfg.Proxies).ShowWhenTruthy("useProxies")
+```
+
+**State — `store`** (`env.Store`): SQLite KV for idempotent re-runs / resume.
+Namespace per module; wrap structs with `NewJSON[T]`.
+
+```go
+ns := env.Store.Namespace(m.Name())
+seen := store.NewJSON[Record](ns)
+rec, ok, _ := seen.Get(key)                 // skip if already done
+seen.Put(key, Record{Status: "done"})       // mark done; survives restarts
+```
+
+**Input — `input`**: error-honest list loading + a thread-safe consumer.
+
+```go
+q, _ := input.LineQueue(filepath.Join(env.FilesDirectory, "emails.txt"))  // *Queue[string]
+for {
+    item, ok := q.Next()                     // one item per worker, drains
+    if !ok { break }
+}
+rows, _ := input.CSV(path)                   // [][]string, RFC-4180 (header is yours to skip)
+rows, _ := input.Columns(path, ":")          // [][]string — you decide the meaning
+q2 := input.NewQueue(records)                // *Queue[T] from any typed slice (e.g. []account)
+line, _ := q.Random()                        // sample with replacement (proxies/names)
+```
+
+Typical CSV → typed queue (this is what the generated `queue` `run.go` does):
+
+```go
+rows, _ := input.CSV(filepath.Join(env.FilesDirectory, m.cfg.InputFile))
+var accs []account
+for i, r := range rows {
+    if len(r) < 2 || (i == 0 && strings.EqualFold(r[0], "email")) { continue }
+    accs = append(accs, account{email: r[0], password: r[1]})
+}
+q := input.NewQueue(accs)                     // *Queue[account]
+```
+
+Validate CSV shape in the configurator (caught *before* the run starts):
+
+```go
+f.File("inputFile", &m.cfg.InputFile).Tag(form.TagLines).
+    ValidateFile(func(path string) error {
+        rows, err := input.CSV(path)
+        if err != nil { return err }
+        if len(rows) == 0 { return errors.New("empty csv") }
+        return nil
+    }).Required()
+```
+
+**Proxies — `proxy`**: parse the usual formats + a rotating pool.
+
+```go
+pool, _ := proxy.LoadPool(filepath.Join(env.FilesDirectory, "proxies.txt"))
+p, ok := pool.Next()                          // round-robin; also pool.Random()
+// p.Host, p.Port, p.Username, p.Password, p.URL()
+```
+
+**Email codes — `mail`**: a persistent IMAP `CodeFetcher` for OTP / verification
+emails. Open one per mailbox at start; call `FetchCode` from workers (it
+multiplexes over one kept-alive, auto-reconnecting connection).
+
+```go
+f, _ := mail.NewCodeFetcher(host, port, user, pass)   // once, in Init
+defer f.Stop()
+// CRITICAL: capture the timestamp BEFORE the action that triggers the send,
+// then pass it (minus a ~60s clock-skew buffer) as `since`, so you match the
+// FRESH code and never a stale one left in a reused / catch-all mailbox.
+mailTime := time.Now().UnixMilli()
+browser.Click(ctx, browserscale.CSS("#send-code"))    // triggers the email
+code, _ := f.FetchCode(ctx, from, toEmail, "", `(\d{6})`, mailTime-60_000, 60_000, true)
+// args: from, to, subjectKeyword, codeRegex(1 group), sinceUnixMilli, timeoutMs, deleteAfterFetch
+```
+
+IMAP `SINCE` is day-granular, so `FetchCode` filters on millisecond
+INTERNALDATE itself — that's why the `mailTime` handshake matters. Full detail
+in the `mail` package doc (`go doc github.com/browserscale/browserscale-kit/mail.CodeFetcher`).
+
+**Logging — `logger`** (`env.Logger`): `logger.NewLogger("[tag]", env.Logger)`
+gives a scoped child; `.Println / .Success / .Error`.
+
+**Output — `env.Output(file, line, mode)`**: append/write result files under
+the task folder (`mode` = `"append"` or `"write"`).
+
+---
+
+## Mental model
+
+- One `*browserscale.CloudBrowser` == one rented browser context bound to one
+  page. You get it already rented inside `doTask`.
+- **Every element on the page — in any frame, same-origin or cross-origin,
+  nested any depth — is reached by the same calls.** A frame is just an opaque
+  `frameId` string you pass to `.InFrame(...)`. There is no second API for
+  iframes.
+- The core loop of most flows is **`Wait` → act**: wait for one of several
+  conditions, branch on which matched, act, repeat.
+- `Navigate` returns at **navigation commit**, not when the page is loaded or
+  interactive. Always follow it with `Wait` for a known landmark (CSS) or the
+  URL/state you want (JS) before observing or clicking.
+
+## Recipes — complete flows to copy
+
+Full, self-contained shapes. Prefer adapting one of these over assembling
+primitives from scratch.
+{{- if or (eq .Kind "queue") (eq .Kind "one-shot")}}
+`register.go` already contains recipe #1 wired up; `flow.go` just calls it.
+{{- else}}
+`task.go` already contains recipe #1 wired up; `flow.go` just calls it.
+{{- end}}
+When you add a second flow, put it in its own file and switch in `doTask`.
+
+**1. Fill a form and branch on the outcome**
+
+```go
+// login.go — one named flow per file
+func (m *Module) login(ctx context.Context, browser *browserscale.CloudBrowser) error {
+    if _, err := browser.Navigate(ctx, "https://target.example/login", 30000); err != nil {
+        return err
+    }
+    // Navigate only waited for commit — wait for a known element before acting.
+    if _, err := browser.Wait(ctx, browserscale.CSS("#user"), browserscale.Timeout(15000)); err != nil {
+        return err
+    }
+    browser.FillWith(ctx, browserscale.CSS("#user"), "alice", browserscale.FillOpts{ClearFirst: true})
+    browser.Fill(ctx, browserscale.CSS("#pass"), "secret")
+    browser.Click(ctx, browserscale.CSS(`button[type="submit"]`))
+
+    wr, err := browser.Wait(ctx,
+        browserscale.CSS("#dashboard"), // 0 = success
+        browserscale.CSS(".login-error"), // 1 = bad creds
+        browserscale.Timeout(20000))
+    if err != nil {
+        return err
+    }
+    if wr.Index == 1 {
+        return errors.New("login rejected")
+    }
+    return nil
+}
+```
+
+**2. Drain a list across workers with de-dup (queue lifecycle)**
+
+`run.go` already loads the CSV into a `*Queue[account]` and pulls one `acc` per
+worker. Make it idempotent — check the store *before* renting a browser so a
+re-run skips finished accounts (and saves credits):
+
+```go
+// in run.go, before the worker loop:
+done := store.NewJSON[bool](env.Store.Namespace(m.Name()))
+
+// inside the loop, after acc, ok := q.Next():
+if v, seen, _ := done.Get(acc.email); seen && v {
+    continue // already processed in a previous run
+}
+if err := m.runOnce(ctx, acc); err != nil {
+    l.Error(acc.email, err)
+    continue
+}
+_ = done.Put(acc.email, true)
+env.Output("results.txt", acc.email+" ok", "append")
+```
+
+**3. Confirm an outcome by network, not DOM**
+
+More reliable than watching for a redirect: race the real backend call.
+
+```go
+browser.Click(ctx, browserscale.CSS("#buy"))
+idx, resp, err := browser.WaitForAnyResponse(ctx, 90000, []browserscale.RequestPattern{
+    {URL: "*/api/order*"},   // 0 = the call we want
+    {URL: "*/api/error*"},   // 1 = a failure signal
+})
+if err != nil || idx == 1 {
+    return errors.New("order failed")
+}
+_ = resp.Body
+```
+
+**4. Solve a captcha mid-flow**
+
+```go
+// After the challenge appears; token + cookies are applied server-side.
+if _, err := browser.SolveCaptcha(ctx, 60000, 3); err != nil {
+    return err
+}
+```
+
+## Locators — what to target
+
+Build a target with one of four constructors (never construct the struct
+directly):
+
+```go
+browserscale.CSS("button.submit")   // CSS selector (light DOM only — does NOT pierce shadow roots)
+browserscale.JS("<expr returning a DOM element>")  // arbitrary JS; can pierce shadow roots via __wrc.shadow
+browserscale.Node(backendNodeId)     // an id from a previous WaitResult/EvaluateResult (actions only)
+browserscale.At(x, y)                // viewport coordinates (Click & MoveTo only)
+```
+
+Chainable modifiers on a locator:
+
+```go
+browserscale.CSS("#banner").Visible(false)   // don't require visibility (wait only; default true)
+browserscale.CSS("#banner").Steady(0)         // disable the 500ms steady-position check (wait only)
+browserscale.CSS("button").InFrame(frameId)   // scope to one frame
+browserscale.CSS("button").InAllFrames()      // search every frame (== .InFrame(browserscale.AllFrames))
+```
+
+Rules:
+- `Node` and `At` are **not** valid `Wait` conditions (they error). They are
+  action targets only.
+- `At(x, y)` is accepted **only** by `Click` and `MoveTo`. `Fill`, `ScrollTo`,
+  `Drag*`, `SelectOption`, `ReadCanvas` require a real element.
+
+### JS-locator idioms — replace hand-rolled `Evaluate` helpers
+
+The `JS(...)` locator returns *any* element from an arbitrary expression, so the
+"there's no CSS for this" helpers you'd write in Playwright are one-liners here.
+Target with `JS(...)` and let the SDK do the real click/fill — never
+`el.click()` inside `Evaluate` (synthetic events are anti-bot-flagged; see Don't).
+
+```go
+// Click by visible text / role (this is your "clickByText" — don't build one):
+browser.Click(ctx, browserscale.JS(
+    `[...document.querySelectorAll('button,[role=button],a,input[type=submit]')]` +
+        `.find(e => /次へ|Next/.test(e.innerText || e.value))`))
+
+// Nth of a duplicated id (CSS "#dup" only ever matches the first one):
+browser.Fill(ctx, browserscale.JS(`document.querySelectorAll('input#dup')[3]`), "value")
+
+// Real checkbox hidden behind a styled label — click the label, then verify:
+browser.Click(ctx, browserscale.CSS("label[for='agree']"))
+if r, _ := browser.Evaluate(ctx, `document.getElementById('agree').checked`); r.Value != true {
+    // not ticked — fall back to the wrapping <label> or the input itself
+}
+```
+
+## Waiting — the primary primitive
+
+```go
+wr, err := browser.Wait(ctx,
+    browserscale.CSS("#success"),                  // condition index 0
+    browserscale.CSS("#error"),                    // condition index 1
+    browserscale.JS("!!window.__ready"),           // condition index 2 (JS predicate)
+    browserscale.Timeout(20000),                   // optional; default 30000ms
+)
+// wr.Index      → which condition matched first (argument order)
+// wr.FrameId    → the frame it matched in
+// wr.BackendNodeId → the matched node (valid only within wr.FrameId)
+switch wr.Index {
+case 1:
+    return errors.New("site showed an error")
+}
+```
+
+- Multiple conditions race; the **first to match wins** and its index is
+  returned. This is *the* way to branch on A/B widgets, error-vs-success pages,
+  captcha-vs-no-captcha, etc.
+- For a CSS/JS condition the SDK requires the element to be **visible** and
+  **position-steady for 500ms** by default. Opt out per condition with
+  `.Visible(false)` / `.Steady(0)`.
+- A JS condition matches as soon as the expression is **truthy** (visible/steady
+  are no-ops unless it returns an Element).
+- Don't build wait loops out of `Evaluate` + `time.Sleep`. `Wait` is the tool.
+- After every `Navigate`, `Wait` for readiness — commit ≠ loaded. Same for
+  clicks that trigger a client-side route change.
+
+Wait for a client-side navigation / redirect the same way — a JS predicate, not
+a poll loop. Prefer asserting the **destination** over "the url changed": it also
+survives multi-hop redirect chains (OAuth, interstitials) that end where you want.
+
+```go
+// Landed on the member page? (works across a login → OAuth → redirect chain)
+browser.Wait(ctx, browserscale.JS(`location.pathname.startsWith("/mypage")`))
+```
+
+## Actions
+
+All actions return their resolved `FrameId`/`BackendNodeId`, so ids flow into
+your script as a side effect.
+
+```go
+browser.Click(ctx, target)                                   // human-like move + full mouseDown/Up
+browser.ClickWith(ctx, target, browserscale.ClickOpts{Button: "right", ClickCount: 2})
+browser.Fill(ctx, target, "text")                            // clicks, focuses, types char-by-char (appends)
+browser.FillWith(ctx, target, "text", browserscale.FillOpts{ClearFirst: true})  // wipe field first
+browser.SelectByValue(ctx, target, "DE")                     // also SelectByIndex / SelectByText (+ *With + SelectOpts{NoEvents})
+browser.ScrollTo(ctx, target)                                // bring element into view (walks nested/OOPIF scrollers)
+browser.MoveTo(ctx, target)                                  // hover (At allowed)
+browser.DragBy(ctx, target, dx, dy)                          // press, drag along human path, release
+browser.DragTo(ctx, target, absX, absY)                      // drag to absolute root-viewport coords
+```
+
+Keyboard (targets whatever is focused):
+
+```go
+browser.PressKey(ctx, "Enter", "Enter", 0, 0)   // key, code, modifiers(Alt=1,Ctrl=2,Meta=4,Shift=8), location
+browser.ReleaseKey(ctx, "Enter", "Enter", 0, 0)
+browser.InsertText(ctx, "pasted text")           // IME-style commit at caret
+```
+
+**Typing that must enable a `disabled` button:** use `Fill`. It types
+character-by-character and fires real key events, so an SPA's client-side
+validators run and flip a gated "next"/"submit" button to enabled. **Don't**
+reach for `InsertText` here — it's a bulk IME commit with **no per-key events**,
+so a button gated on real input stays disabled and you'll waste time re-typing.
+
+`*Opts.InFrame` (Click/Fill/Select*) overrides the locator's frame — handy to
+reuse one base locator across frames. `MoveTo`/`ScrollTo`/`Drag*` take the frame
+from the locator itself.
+
+## Evaluate — arbitrary JS
+
+```go
+r, err := browser.Evaluate(ctx, "document.title")        // main frame
+r, err := browser.EvaluateInFrame(ctx, frameId, "location.href")  // a specific frame
+```
+
+Two result shapes on the single `EvaluateResult`:
+- **Value path** — a JSON value → `r.Value` (`string`/`float64`/`bool`/`[]any`/`map[string]any`/`nil`). Type-assert it: `n, _ := r.Value.(float64)`.
+- **Element path** — the expression returned a DOM Element → `r.Value` is `nil`
+  but `r.BackendNodeId` is non-zero. Act on it with `browserscale.Node(r.BackendNodeId)`.
+
+Rules:
+- **Single expression only.** Multi-statement bodies need an IIFE:
+  `(() => { ...; return x; })()`.
+- A thrown JS error surfaces as a Go error on the call.
+- Don't use `Evaluate` to click (`el.click()`) — it fires synthetic events with
+  no mouse path and anti-bot stacks flag it. Use `Click`.
+
+## Scripts — move a chatty loop into the browser
+
+`RunScript` sends JavaScript to run *in the browser process*, with a `browser`
+object exposing the same operations as this SDK. Each call inside the script is a
+local function call, not a gRPC round trip, so a step costs microseconds instead
+of tens of milliseconds.
+
+```go
+result, err := browser.RunScript(ctx, `
+    const out = [];
+    for (let page = 1; page <= 20; page++) {
+        await browser.click({ selector: ".next" });
+        await browser.wait({ selector: ".row" });
+        for (const el of await browser.getDOM().querySelectorAll(".row")) {
+            out.push(el.textContent);
+        }
+    }
+    return out;
+`)
+if err != nil { return err }          // the script could not be delivered
+if !result.Success {                  // the script threw; the message is in Result
+    return fmt.Errorf("scrape failed: %s", result.Result)
+}
+```
+
+`result.Result` is the return value as JSON; `result.Log` is everything the script
+printed. Note the two failure modes: a Go error means the call did not happen, a
+`Success == false` means it ran and threw.
+
+**When to reach for it.** Only when the round trips are what costs you: a poll
+loop, a walk over many elements, pagination. A flow of a dozen clicks is clearer
+as Go, and Go is where you have types, the kit, and a debugger. Moving a whole
+flow into a string is a step backwards.
+
+**Long-running work** uses `StartScript`, which returns a run id at once and
+streams output to a handler, with `run.Wait(ctx)` for the outcome and
+`run.Stop(ctx)` to cancel. `RunScript` cannot be cancelled — its run id only
+arrives with the reply — so use `StartScript` for anything that might not finish.
+
+## Frames & iframes
+
+`frameId` is an opaque string; everything takes it uniformly.
+
+```go
+// Don't know which frame? Fan out, then act in the frame it matched.
+r, _ := browser.Wait(ctx, browserscale.CSS("button.accept-all").InAllFrames())
+browser.Click(ctx, browserscale.Node(r.BackendNodeId).InFrame(r.FrameId))
+
+// Explicit tree (rarely needed in the hot path):
+pages, _ := browser.GetPages(ctx)   // []*PageInfo, each with a recursive FrameTree (FrameInfo)
+```
+
+`FrameInfo` fields you'll use: `FrameId`, `Url`, `IsOOPIF`, `HasJSContext`
+(false → `EvaluateInFrame` will fail), `IsVisible`, `AbsoluteRect`
+(root-viewport coords, even for deep OOPIFs — use for `Click(At(x,y))`).
+
+Gotchas:
+- `browserscale.AllFrames` is the sentinel `"ALL_FRAMES"`, not a real id.
+  `EvaluateInFrame` does **not** accept it — discover the frame with
+  `Wait(...).InAllFrames()` first, then evaluate in `r.FrameId`.
+- A navigation mints a **new** `frameId`; a `backendNodeId` is valid only
+  paired with the `FrameId` from the same result. Don't carry either across
+  navigations.
+
+## Reading the page
+
+```go
+obs, _ := browser.GetObservation(ctx)          // FIRST look at any page, and the cheapest re-read of its state
+rev, _ := browser.GetDomRevision(ctx, "")      // O(1) mutation counter - poll this to ask "did the document move?"
+dom, _ := browser.GetDOM(ctx, "", -1)          // full CDP DOM.Node JSON, one snapshot (depth -1 = whole tree)
+hash, _ := browser.GetDOMHash(ctx, "")         // sha256[:8] - only to compare *content*, not to detect movement
+shot, _ := browser.Screenshot(ctx, "png", 0)   // shot.DataBase64 / Width / Height
+
+// Follow the DOM instead of re-reading it: ONE live tree for the whole page,
+// reporting changes only inside what you expanded, so a subtree nobody opened
+// costs a child count instead of a re-serialized document. An <iframe> is an
+// ordinary element whose one child is the document it hosts. Replaces a
+// GetDOMHash + GetDOM polling loop. See docs/guides/dom-mirror.md.
+mirror, _ := browser.MirrorDom(ctx, browserscale.DomMirrorOptions{}, func(m *browserscale.DomMirror) {
+    render(m.Root())                           // "something moved, re-read the root"
+}, nil)
+defer mirror.Stop(ctx)
+
+// Narrow it when a page is huge, ask for JSON, or re-read one subtree:
+obs, _ = browser.GetObservationWith(ctx, browserscale.ObservationOpts{ViewportOnly: true})
+obs, _ = browser.GetObservationWith(ctx, browserscale.ObservationOpts{Format: "json"})
+obs, _ = browser.GetObservationWith(ctx, browserscale.ObservationOpts{Selector: "form#register"})
+```
+
+`GetObservation` returns text meant to be read as-is. Per frame it emits header
+lines, then one line per visible element:
+
+```
+# frame 8F03BF2EEB5ADC9CE47B15775289BBD3 https://example.com/register
+# title "Account registration"
+# scroll y=1200/8400
+input#email[47] type="email" name="loginId" value="a@b.com" required click "E-Mail"
+input#agree[51] type="checkbox" checked="false" required click "Accept terms"
+button[70] type="submit" click "Continue"
+```
+
+- **Don't re-derive state with `Evaluate`.** URL, title, scroll offset, live
+  input values, checkbox state and duplicate-id flags are all in there already.
+  `value=` is the live property (so it proves a `Fill` landed; passwords show as
+  a length), and the trailing quoted string is always the label — never the
+  value — so an empty and a prefilled field stay distinguishable.
+- **Flags:** `click` = interactive, `offscreen` = `ScrollTo` it first,
+  `disabled`/`required`/`readonly`/`selected`, `hidden="reason"` = interactive
+  but not seeable, `id-not-unique` / `id-not-selectable` = the `#id` selector is
+  ambiguous or points elsewhere.
+- **Picking a target:** `backendNodeId` (the `47`) works via `Node(47)` but dies
+  with the document — useless in the code you're writing. Prefer `name`, then an
+  unflagged id, then a text/label relation via `JS(...)`, never a generated class
+  name. Act through that durable target during exploration and every call that
+  worked is already a line of your script; actions return the `backendNodeId`
+  they hit, so compare it against the observation to prove the anchor is right.
+- **`# budget spent`** means the rest of that frame degraded to interactive
+  elements only — scroll and observe again, or use `ViewportOnly`.
+- **Subtree scope:** after the first full look, pass `Selector` /
+  `JSExpression` / `BackendNodeId` (+ `InFrame` when needed) so follow-up
+  looks cost the form, not the ads around it. Child iframes inside the
+  scope are still visited.
+
+## Captcha & tainted canvas
+
+```go
+// Detects & solves the first supported challenge; token/cookies applied server-side.
+_, err := browser.SolveCaptcha(ctx, 60000, 3)   // timeoutMs (0=60s default), retryAmount
+
+// Read a <canvas> even if cross-origin/tainted (toDataURL would throw). Bypasses page JS.
+res, _ := browser.ReadCanvas(ctx, browserscale.CSS("#chart canvas"))         // res.DataBase64, Width, Height, OriginClean
+res, _ := browser.ReadCanvasWith(ctx, browserscale.CSS("canvas"),
+    browserscale.ReadCanvasOpts{Format: "jpeg", Quality: 80, SW: 150, SH: 300}) // Format: png|jpeg|webp|rgba; SX/SY/SW/SH in canvas pixels
+```
+
+## Shadow DOM — `__wrc.shadow`
+
+CSS selectors don't cross shadow boundaries. Inside any `Evaluate`/`Wait`/JS
+locator, the native helper `__wrc.shadow(host)` returns a host's shadow root
+(open **or closed**). It's a function-scoped local, never a `window` global.
+
+```go
+// Wait for something behind a closed shadow root:
+browser.Wait(ctx, browserscale.JS(`!!__wrc.shadow(document.querySelector("my-widget"))?.querySelector(".ready")`))
+
+// Act on an element inside it — JS-expression targeting resolves & clicks it for real:
+browser.Click(ctx, browserscale.JS(`__wrc.shadow(document.querySelector("my-widget")).querySelector("button.accept")`))
+```
+
+Works for `Click`, `Fill`, `ScrollTo`, `SelectOption`, `Drag*`, `ReadCanvas`.
+The manual `Click(At(x,y))` detour is only for targets inside a **cross-origin
+iframe** (see `FrameInfo.AbsoluteRect`).
+
+## Network
+
+```go
+browser.SetBlockList(ctx, []string{"*.doubleclick.net/*", "*googletagmanager.com*"})  // drop matching requests
+browser.SetStaticPaths(ctx, "snap-id", []string{"*.example.com/*"})                   // serve cached assets (saves bandwidth/credits)
+
+// Race a real backend request against another action — more reliable than a DOM redirect.
+idx, req, err := browser.WaitForAnyRequest(ctx, 90000, []browserscale.RequestPattern{
+    {URL: "*/api/success*"},
+    {URL: "*/error*", Abort: true},   // Abort drops it with an empty 200
+})
+idx, resp, err := browser.WaitForAnyResponse(ctx, 90000, patterns)  // resp.StatusCode / Body / Headers
+req, err := browser.ModifyRequest(ctx, "*/api/me", "", 5000, []browserscale.HeaderModification{
+    {Action: browserscale.HeaderModificationAdd, Name: "X-Trace", Value: "abc"},
+})
+
+// Log EVERY request the session completes, instead of trapping one. Runs in the
+// browser process, so cross-process iframes, workers and each hop of a redirect
+// chain are included; nothing is ever paused. See docs/guides/capture.md.
+capture, _ := browser.CaptureNetwork(ctx, browserscale.NetworkCaptureOptions{
+    Patterns: []string{"*/api/*"},              // prefix a pattern with "!" to exclude it
+    Bodies:   browserscale.NetworkBodiesText,   // "none" (default) / text / all
+}, func(ex browserscale.NetworkExchange) {
+    log.Println(ex.StatusCode, ex.Method, ex.Url) // NEVER block in here; hand slow work to a channel
+})
+defer capture.Stop(ctx)                          // a cancelled ctx alone leaves it armed
+```
+
+## Cookies & storage
+
+```go
+cookies, _ := browser.GetCookies(ctx)                 // []CookieParam
+browser.SetCookies(ctx, []browserscale.CookieParam{
+    {Name: "a", Value: "b", Domain: "example.com", Path: "/"},
+})
+browser.ClearCookies(ctx)
+storage, _ := browser.GetStorage(ctx, "")             // localStorage grouped by origin; feed back verbatim to SetStorage
+browser.SetStorage(ctx, storage)
+```
+
+Session metadata getters: `browser.CountryCode()`, `browser.Timezone()`,
+`browser.AcceptLanguage()`, `browser.Fingerprint()`, `browser.SessionId()`.
+
+## Proven patterns
+
+- **Branch on A/B / success-vs-fail** with a multi-condition `Wait` and
+  `switch wr.Index` — never guess which variant rendered. After a click that
+  should leave the page, include a "navigated away" condition (e.g.
+  `JS(\`location.pathname !== ${strconv.Quote(from)}\`)`) in the race so the
+  *old* page can't match again immediately.
+- **Unknown page while mapping**: `GetObservation(ctx)`, log it, return
+  `ErrInspect` (defined in `run.go` for queue modules) so the status line
+  shows Inspect and you can attach to the live session — don't invent the
+  next click.
+- **Confirm outcome by network**, not DOM: after a submit/captcha, race
+  `WaitForAnyRequest` on the real backend endpoints against your other steps.
+- **Locate-then-act**: one `Evaluate`/`Wait` returns a `BackendNodeId`; act with
+  `browserscale.Node(id)` — no second lookup, survives tricky selectors.
+- **On a new/unknown page, observe first**: `GetObservation(ctx)` is your cheap
+  first look and your cheap re-read after every step; also log it when a
+  selector breaks. On click/fill failure, observe before writing more JS.
+- **One file per named flow**: `register.go` / `enter.go` / `login.go`. Keep
+  `doTask` as the dispatcher — never grow a second flow inside the same file.
+- **Bare rent + proxy**: leave country/timezone unset so they match the proxy
+  exit IP (same as MCP `rent`). Overrides are for intentional mismatch only.
+- **Save credits**: `SetBlockList` heavy trackers / `SetStaticPaths` frozen
+  assets on flows that reload a lot.
+- **Retry / Inspect outcomes**: return `ErrRetry` or `ErrInspect` from the
+  flow when those sentinels exist in `run.go` — the queue status line counts
+  them separately from plain failures. To retry a specific step, loop inside
+  the flow; to retry a whole item, re-enqueue it.
+
+## Don't
+
+- Don't dump the whole automation into `flow.go` / `doTask` — dispatch to named
+  flow files instead.
+- Don't `time.Sleep` where a `Wait(...)` condition works.
+- Don't drive clicks/typing through `Evaluate` (`el.click()`, `el.value = "..."`)
+  — use `Click` / `Fill` / `InsertText`.
+- Don't `evaluate` DOM surgery (`.remove()` on headers/overlays) to "help"
+  clicks — `Click` already evades sticky/fixed occluders; if still blocked,
+  `observe`, then dismiss via a real close control or scroll, and retry.
+- Don't re-derive page state with `Evaluate` (`document.title`, `location.href`,
+  `body.innerText`, hand-rolled input maps) — `GetObservation` already has it.
+- Don't add `WithCountryCode` / `WithTimezone` on every rent "to be safe".
+- Don't carry a `backendNodeId` or `frameId` across a navigation.

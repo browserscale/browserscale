@@ -1,0 +1,48 @@
+package main
+
+import (
+	"context"
+	"sync"
+
+	"github.com/browserscale/browserscale-kit/logger"
+	"github.com/browserscale/browserscale-kit/module"
+)
+
+// Run spawns workers that each keep running the task in a loop until the
+// process is stopped (Ctrl-C / SIGTERM cancels ctx). Edit freely.
+func (m *Module) Run(ctx context.Context, env module.Env) error {
+	l := logger.NewLogger("[run]", env.Logger)
+
+	if err := m.loadProxies(env); err != nil {
+		return err
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < m.threads(); i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if err := m.runOnce(ctx); err != nil {
+					l.Error("worker", id, err)
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+	return nil
+}
+
+func (m *Module) runOnce(ctx context.Context) error {
+	browser, err := m.rent(ctx)
+	if err != nil {
+		return err
+	}
+	defer browser.StopBrowser(ctx)
+	return m.doTask(ctx, browser)
+}

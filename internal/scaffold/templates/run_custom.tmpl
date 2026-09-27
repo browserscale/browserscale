@@ -1,0 +1,26 @@
+package main
+
+import (
+	"context"
+
+	"github.com/browserscale/browserscale-kit/module"
+)
+
+// Run owns the module's entire lifecycle. The CLI left this intentionally
+// minimal — write whatever control flow your task needs (single run, worker
+// pool, forever loop, scheduler, resume-from-store, …). m.rent and m.doTask
+// are your building blocks; m.threads() and env (Store/Output/Logger/Files)
+// are available too.
+func (m *Module) Run(ctx context.Context, env module.Env) error {
+	if err := m.loadProxies(env); err != nil {
+		return err
+	}
+
+	browser, err := m.rent(ctx)
+	if err != nil {
+		return err
+	}
+	defer browser.StopBrowser(ctx)
+
+	return m.doTask(ctx, browser)
+}

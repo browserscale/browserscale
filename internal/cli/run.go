@@ -24,10 +24,10 @@ Runs a JavaScript file inside a rented browser and waits for it to finish.
 
 The script does not run in the page. It runs beside the browser in an isolate of
 its own and reaches the document through the engine: a cross-origin iframe is
-read as plain `+"`contentDocument`"+` with no frame ids anywhere, values come back as live
-objects you can assign to rather than snapshots, an element can be handed
-straight to `+"`browser.click`"+`, and the page sees nothing injected. Steps cost
-microseconds instead of network round trips, so loops are affordable.
+read as plain `+"`contentDocument`"+` with no frame ids anywhere, values come back
+as live objects you can assign to rather than snapshots, an element can be
+handed straight to `+"`browser.click`"+`, and the page sees nothing injected. Steps
+cost microseconds instead of network round trips, so loops are affordable.
 
 A guide for it is still to come.
 

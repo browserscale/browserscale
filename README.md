@@ -36,17 +36,6 @@ go install github.com/browserscale/browserscale@latest
 
 Builds from source, needs **Go 1.25+**. Pin a version with `@v0.3.0` instead of `@latest`. The binary lands in your `GOPATH/bin`.
 
-### Homebrew (macOS)
-
-```bash
-brew tap browserscale/tap
-brew install browserscale
-```
-
-The tap is a one-time step; after that `brew install browserscale` and `brew upgrade browserscale` are the whole story.
-
-This route is macOS-only, which is about Homebrew and not about the CLI: the tap publishes a *cask*, and Homebrew refuses casks on Linux. On Linux, install with npm or Go — same binary, same `browserscale` command, nothing missing.
-
 ## Commands
 
 The commands come in two groups, and the split is about what a mistake costs. The first two act on the directory you are standing in: no key, no network, and a wrong answer costs a rebuild. The rest act on rented browsers — they need an API key, reach a machine elsewhere, and a wrong session id can throw away work you are paying for.
@@ -65,7 +54,7 @@ The commands come in two groups, and the split is about what a mistake costs. Th
 | [`login`](#login) | Save an API key so the commands below need no flag. |
 | [`list`](#list) | Show the sessions this key is paying for. |
 | [`rent`](#rent) | Rent a session and leave it running. |
-| [`run`](#run) | Run a script inside a session. |
+| [`run`](#run) | Run a script inside a session (BrowserVM, early access). |
 | [`view`](#view) | Watch a session's screen, and drive it by hand. |
 | [`stop`](#stop) | End a session. |
 | [`runs`](#runs) | Work with the scripts inside a session. |
@@ -81,7 +70,7 @@ Every command takes `-h` for its own flags, and every browser command takes `-js
 
 ### `init`
 
-Every browserscale automation starts with the same setup: a `go.mod` pinned to the SDK and kit, a `main()` that hands off to the harness, a config schema, and a rent-with-backoff loop, all *before* you get to the actual browser flow. `init` writes that scaffolding for you, so the generated folder **compiles and runs as-is** against the playground and is ready to drop straight into an agentic coding tool.
+Every browserscale automation starts with the same setup: a `go.mod` that pulls in the SDK and kit, a `main()` that hands off to the harness, a config schema, and a rent-with-backoff loop, all *before* you get to the actual browser flow. `init` writes that scaffolding for you, so the generated folder **compiles as-is**, ships a worked flow against the playground, and is ready to drop straight into an agentic coding tool. To run that flow end to end you add what a real signup needs: a proxy in `data/proxies.txt` and, for the emailed code, a catch-all mailbox.
 
 `flow.go` stays a thin dispatcher; the worked example lives in a named flow file (`register.go` or `task.go`). Add further flows as sibling files (`enter.go`, `login.go`, …) — one flow per file. The generated `AGENTS.md` plus an offline `docs/` tree mean an agent reads real API signatures instead of guessing — less vibe-coding, fewer wrong-API round-trips.
 
@@ -147,7 +136,8 @@ example_module/
 └── docs/                  # the FULL browserscale docs, offline
     ├── introduction.md  ·  quickstart.md  ·  concepts.md
     ├── guides/           # locators, waiting, loading, interaction, reading, evaluation,
-    │                     # frames, network, cookies, captchas, shadow-canvas, agentic-coding
+    │                     # frames, network, capture, dom-mirror, cookies, captchas,
+    │                     # shadow-canvas, agentic-coding
     └── api-reference/go.md
 ```
 
@@ -180,7 +170,7 @@ browserscale dev -run dig
 
 Two of the generated files exist purely to make an agent productive from the first prompt:
 
-- **`AGENTS.md`** — a focused SDK + kit reference: the thin-`doTask` / one-file-per-flow layout, the canonical *navigate → wait → act → branch* rhythm, how to use `JS()` locators instead of hand-rolling `clickByText`, multi-condition `Wait`, `Fill` vs `InsertText`, the `browserscale-kit` helpers (store, proxy, input, mail with the `mailTime` idiom), and — when connected — the optional **browserscale MCP server** for probing a live session.
+- **`AGENTS.md`** — a focused SDK + kit reference: the thin-`doTask` / one-file-per-flow layout, the canonical *navigate → wait → act → branch* rhythm, how to use `JS()` locators instead of hand-rolling `clickByText`, multi-condition `Wait`, reactions for interstitials, typed errors to branch on with `errors.As`, `Fill` vs `InsertText`, the `browserscale-kit` helpers (store, proxy, input, mail with the `mailTime` idiom), and — when connected — the optional **browserscale MCP server** for probing a live session.
 - **`docs/`** — the entire browserscale documentation, **bundled offline**, so the agent opens the exact page (e.g. `docs/guides/interaction.md`) or greps for a method (`grep -rin waitforany docs/`) instead of guessing an API or making a network call. The bundle is mirrored from the SDK docs pipeline and kept in sync by CI.
 
 The result: less "vibe coding", fewer wrong-API round-trips, and a correct project structure from the start.
@@ -298,7 +288,7 @@ browserscale run <session-id> -            # read the script from stdin
 
 The script does not run in the page. It runs beside the browser in an isolate of its own and reaches the document through the engine: a cross-origin `<iframe>` is read as plain `contentDocument` with no frame ids anywhere, values come back as live objects you can assign to rather than snapshots, an element can be handed straight to `browser.click`, and the page sees nothing injected. Steps cost microseconds instead of network round trips, so loops are affordable.
 
-A guide for it is still to come. Until then, the examples above and `browserscale run -h`.
+This is [BrowserVM](https://browserscale.cloud/browservm), which is in **early access**. On an account without it, `run` and `runs` say so and point you to where to request access, rather than failing with a raw error.
 
 **The log streams.** Lines appear on stdout as the script prints them, not in one block when it finishes — so a script that runs for a minute is something you can watch, and a script that hangs shows you where. The return value follows the log on the same stream once the script ends.
 

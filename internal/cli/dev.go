@@ -178,7 +178,7 @@ func lookGo() (string, error) {
 	}
 	return "", errors.New(`go not found on PATH.
 
-Install Go 1.25+ from https://go.dev/dl/ and ensure the installer added the
+Install Go 1.25.8+ from https://go.dev/dl/ and ensure the installer added the
 Go bin directory to your PATH (open a new terminal after installing).
 On Windows, typical location: %USERPROFILE%\go\bin or C:\Program Files\Go\bin`)
 }

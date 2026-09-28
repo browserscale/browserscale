@@ -6,7 +6,7 @@ is **Go only**. Prefer opening the specific file below over guessing an API.
 
 ## Files
 
-- `introduction.md` — Docs: browserscale documentation: rent a real cloud Chromium session and drive it from Go or TypeScript. Quickstart, core concepts, guides, and the full SDK reference.
+- `introduction.md` — Docs: browserscale documentation: real cloud Chromium with waits, clicks, frames and network handled inside the engine. Drive it from Go, TypeScript, the CLI or MCP. Quickstart, guides and the full SDK reference.
 - `quickstart.md` — Quickstart: Install the browserscale Go or TypeScript SDK, rent a cloud Chromium session, and run your first script in under five minutes.
 - `concepts.md` — Core concepts: Sessions, locators, frames, the flat frame model, and the action / wait / read loop that every browserscale script is built on.
 - `guides/locators.md` — Targeting elements: CSS, JavaScript, node-handle and coordinate locators for picking elements on the page in the browserscale Go and TypeScript SDKs.

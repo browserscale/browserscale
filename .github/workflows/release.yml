@@ -30,8 +30,8 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
-      # Builds every target, uploads the GitHub release, and pushes the
-      # Homebrew cask to the tap. `go install` needs none of this.
+      # Builds every target and uploads the GitHub release. `go install` needs
+      # none of this.
       - name: GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -39,8 +39,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The default token cannot write to another repository.
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Stage npm packages
         run: node scripts/build-npm.mjs --version "${GITHUB_REF_NAME#v}" --dist dist --out dist/npm

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -212,4 +213,18 @@ func chdir(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(prev) })
+}
+
+func TestExplainScriptAccess(t *testing.T) {
+	gated := explainScriptAccess(errors.New("rpc error: code = PermissionDenied desc = FEATURE_NOT_ENABLED: BrowserVM is in early access"))
+	if gated == nil || !strings.Contains(gated.Error(), "early access") || strings.Contains(gated.Error(), "rpc error") {
+		t.Errorf("gated error not translated: %v", gated)
+	}
+	other := errors.New("rpc error: code = Unavailable")
+	if got := explainScriptAccess(other); got != other {
+		t.Errorf("unrelated error changed: %v", got)
+	}
+	if explainScriptAccess(nil) != nil {
+		t.Error("nil must stay nil")
+	}
 }

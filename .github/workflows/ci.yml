@@ -4,7 +4,7 @@
 # Two things are checked, because the CLI reaches its users two different ways.
 # `go install` compiles this module from source, so the code has to build against
 # the *published* SDK — there is no workspace here to paper over an unreleased
-# method. npm and Homebrew ship the binaries GoReleaser builds, so that chain is
+# method. npm ships the binaries GoReleaser builds, so that chain is
 # exercised too: a break in it would otherwise surface at tag time, when the
 # version is already public.
 name: ci
@@ -75,8 +75,8 @@ jobs:
         with:
           node-version: "22"
 
-      # --snapshot builds every target and writes the archives, the checksums
-      # and the Homebrew cask, but publishes nothing and needs no tag.
+      # --snapshot builds every target and writes the archives and the
+      # checksums, but publishes nothing and needs no tag.
       - name: GoReleaser (dry run)
         uses: goreleaser/goreleaser-action@v6
         with:

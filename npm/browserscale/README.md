@@ -9,10 +9,9 @@ browserscale init
 
 This package is a thin launcher. The CLI itself is a single static Go binary, shipped as one small package per platform (`@browserscale/cli-linux-x64` and friends) and selected by npm through the `os`/`cpu` fields. There is no postinstall script and nothing is downloaded at install time.
 
-Other ways to install:
+Or build it from source with a Go toolchain:
 
 ```bash
-brew install browserscale/tap/browserscale        # macOS
 go install github.com/browserscale/browserscale@latest
 ```
 

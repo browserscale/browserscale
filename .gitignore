@@ -14,3 +14,7 @@ node_modules/
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# Local workspace pointing at a sibling SDK checkout; never part of this repo
+go.work
+go.work.sum

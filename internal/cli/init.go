@@ -15,7 +15,7 @@ func runInit(args []string) error {
 	var (
 		name         = fs.String("name", "", "module name (also the target directory)")
 		module       = fs.String("module", "", "go module path (default: name)")
-		kind         = fs.String("kind", "", "lifecycle: one-shot|repeat|continuous|scheduled|custom")
+		kind         = fs.String("kind", "", "lifecycle: one-shot|queue|repeat|continuous|scheduled|custom")
 		threading    = fs.String("threading", "", "threading: single|fixed|configurable")
 		fixedThreads = fs.Int("fixed-threads", 4, "worker count when threading=fixed")
 		dir          = fs.String("dir", "", "target directory (default: ./<name>)")

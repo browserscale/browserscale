@@ -12,7 +12,7 @@ Auto-generated from Go doc-comments. Every method takes `ctx context.Context` as
 
 CloudBrowser is the SDK-side handle for an active browserscale browser session.
 
-One CloudBrowser corresponds to exactly one browser context, which is implicitly bound to its primary page server-side. The proto's page_id field is currently ignored server-side, so the SDK never sets it.
+One CloudBrowser corresponds to exactly one browser context, and its commands act on that context's primary page.
 
 ### `AcceptLanguage() → string`
 
@@ -26,7 +26,7 @@ AcceptLanguage returns the Accept-Language header value the session was provisio
 
 *method on `CloudBrowser`*
 
-AddReaction registers a one-shot "reaction": a background poller (one shared loop per page) watches for the match locator and, as soon as it matches, clicks it with the full smart-click machinery (scroll, human path, occlusion gate, evade) — then removes itself. The poller yields to any in-flight input action and only fires while the pointer is idle, so a reaction naturally slots into the gaps of a retrying foreground action (e.g. it dismisses a newsletter modal blocking a CloudBrowser.Click, after which the click's own retry succeeds). Reactions are scoped to the page and torn down automatically when the page/session ends.
+AddReaction registers a one-shot "reaction": the browser watches for the match locator in the background and, as soon as it matches, clicks it the same way CloudBrowser.Click does (scroll, human path, occlusion check) — then removes itself. The reaction yields to any in-flight input action and only fires while the pointer is idle, so a reaction naturally slots into the gaps of a retrying foreground action (e.g. it dismisses a newsletter modal blocking a CloudBrowser.Click, after which the click's own retry succeeds). Reactions are scoped to the page and torn down automatically when the page/session ends.
 
 match must be a CSS or JS Locator — Node and At are rejected. Use Locator.InAllFrames to watch every frame and Locator.Visible(false) to opt out of the default visibility gate.
 
@@ -34,9 +34,6 @@ match must be a CSS or JS Locator — Node and At are rejected. Use Locator.InAl
 - `match` (`*Locator`) — the CSS/JS locator to watch for
 
 **Returns:** `string` — the reactionId (pass to CloudBrowser.RemoveReaction)
-
-**Throws:**
-- `INVALID_LOCATOR` — match is nil, has no selector/JS expression, or is
 
 ```go
 // Auto-dismiss a consent button whenever it appears, in any frame.
@@ -63,9 +60,6 @@ match must be a CSS or JS Locator — Node and At are rejected. Use Locator.InAl
 - `opts` (`ReactionOpts`) — reaction customization; see ReactionOpts
 
 **Returns:** `string` — the reactionId (pass to CloudBrowser.RemoveReaction)
-
-**Throws:**
-- `INVALID_LOCATOR` — match is nil, has no selector/JS expression, or is
 
 ```go
 // Watch for a newsletter modal, but click its close "X" instead.
@@ -101,9 +95,6 @@ This call returns as soon as the capture is running; onExchange then fires in th
 
 **Returns:** `*NetworkCapture` — *NetworkCapture handle for stopping the capture and inspecting how
 
-**Throws:**
-- `UNKNOWN_ERROR` — onExchange is nil, or the capture could not be started
-
 ```go
 capture, err := browser.CaptureNetwork(ctx, browserscale.NetworkCaptureOptions{
     Patterns: []string{"*/api/*"},
@@ -125,8 +116,7 @@ _, _ = browser.Navigate(ctx, "https://example.com", 0)
 
 ClearCookies deletes every cookie in the browser context.
 
-**Throws:**
-- `UNKNOWN_ERROR` — the cookies could not be cleared
+Reports only transport failures - a dead session, a page that is gone, a broken connection. This call has no semantic failure of its own, so there are no error codes to branch on.
 
 ```go
 _ = browser.ClearCookies(ctx)
@@ -140,9 +130,6 @@ ClearStorage deletes localStorage in the browser context.
 
 **Parameters:**
 - `origin` (`string`) — if non-empty, only this origin's storage is deleted (e.g. "https://example.com"); empty string deletes all origins
-
-**Throws:**
-- `UNKNOWN_ERROR` — the storage could not be cleared
 
 ```go
 // Wipe one origin.
@@ -158,19 +145,16 @@ _ = browser.ClearStorage(ctx, "")
 
 Click triggers a single left mouse click on the given target.
 
-The browser scrolls the element into view if needed, moves the cursor along a human-like path, then dispatches a full mouseDown+mouseUp at a randomized point inside the element's bounding rect.
+The element does not have to be ready when you call this. For up to 5s the browser keeps re-locating it, scrolls it into view, waits for its bounds to hold still for 750ms, and hit-tests the exact point it is about to press — so a plain Click also does the work of a preceding CloudBrowser.Wait, and needs no retry loop of your own. If the element never settles within that budget the click is attempted at the deadline rather than abandoned.
+
+If something covers the target, the pointer is repositioned once to an exposed part of it, which also gives hover-triggered overlays a chance to collapse. Only if the target is still covered afterwards does the click refuse — it never presses whatever happens to lie on top.
+
+The cursor then moves along a human-like path rather than jumping, and a full mouseDown+mouseUp is dispatched at a randomized point inside the element's bounding rect.
 
 **Parameters:**
 - `target` (`*Locator`) — locator describing what to click; At is also valid
 
 **Returns:** `*ElementResult` — *ElementResult with success, resolved frameId, backendNodeId,
-
-**Throws:**
-- `ELEMENT_NOT_FOUND` — no element matched the locator
-- `FRAME_NOT_FOUND` — the requested frame does not exist
-- `INVALID_LOCATOR` — target is empty or has multiple targets set
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `TIMEOUT` — the operation exceeded the server-side timeout
 
 ```go
 res, err := browser.Click(ctx, browserscale.CSS("button.submit"))
@@ -192,20 +176,17 @@ if err != nil {
 
 ClickWith is the customizable variant of CloudBrowser.Click.
 
-The browser scrolls the element into view if needed, moves the cursor along a human-like path, then dispatches a full mouseDown+mouseUp at a randomized point inside the element's bounding rect.
+The element does not have to be ready when you call this. For up to 5s the browser keeps re-locating it, scrolls it into view, waits for its bounds to hold still for 750ms, and hit-tests the exact point it is about to press — so a plain Click also does the work of a preceding CloudBrowser.Wait, and needs no retry loop of your own. If the element never settles within that budget the click is attempted at the deadline rather than abandoned.
+
+If something covers the target, the pointer is repositioned once to an exposed part of it, which also gives hover-triggered overlays a chance to collapse. Only if the target is still covered afterwards does the click refuse — it never presses whatever happens to lie on top.
+
+The cursor then moves along a human-like path rather than jumping, and a full mouseDown+mouseUp is dispatched at a randomized point inside the element's bounding rect.
 
 **Parameters:**
 - `target` (`*Locator`) — locator describing what to click; At is also valid
 - `opts` (`ClickOpts`) — click customization; see ClickOpts
 
 **Returns:** `*ElementResult` — *ElementResult with success, resolved frameId, backendNodeId,
-
-**Throws:**
-- `ELEMENT_NOT_FOUND` — no element matched the locator
-- `FRAME_NOT_FOUND` — the requested frame does not exist
-- `INVALID_LOCATOR` — target is empty or has multiple targets set
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `TIMEOUT` — the operation exceeded the server-side timeout
 
 ```go
 // Right double-click on a context menu trigger.
@@ -226,9 +207,6 @@ Close is the defer-friendly alias for CloudBrowser.StopBrowser that uses a backg
 
 Useful when a session id was persisted across processes and the rental outlived the original handle. Only calls the rent stop endpoint; there is no gRPC connection to close in this form.
 
-**Throws:**
-- `UNKNOWN_ERROR` — the stop API rejected the request
-
 ```go
 browser, err := browserscale.RentBrowser(ctx, cfg)
 if err != nil { log.Fatal(err) }
@@ -243,8 +221,7 @@ CloseConn closes only the gRPC connection, leaving the server-side session runni
 
 Use this to detach without releasing the rental — the common case when you attached with ConnectSession to act on a session owned elsewhere, or when a short-lived handle should not outlive its work but the session must. Contrast with CloudBrowser.Close / CloudBrowser.StopBrowser, which also release the rental via the stop endpoint.
 
-**Throws:**
-- `UNKNOWN_ERROR` — the gRPC connection could not be closed
+Reports a plain error when the connection cannot be closed cleanly. The local handle is unusable afterwards regardless.
 
 ```go
 browser, err := browserscale.ConnectSession(ctx, grpcUrl, apiKey, sessionId)
@@ -266,7 +243,7 @@ CountryCode returns the ISO-3166 country code the server allocated for this sess
 
 DragBy picks up the target and drops it at an offset relative to the pickup point.
 
-The browser presses the left mouse button at a pickup point inside the element, drags along a human-like path to (pickupX+offsetX, pickupY+offsetY), then releases. At is not a valid target — drag needs a real element.
+The source is acquired with the same smart click as CloudBrowser.Click — re-located, scrolled into view, settled and hit-tested — so the handle does not have to be ready when you call this. The browser then presses the left mouse button at a point inside the element, drags along a human-like path to (pickupX+offsetX, pickupY+offsetY), and releases. At is not a valid target — drag needs a real element.
 
 **Parameters:**
 - `target` (`*Locator`) — locator describing the element to pick up
@@ -275,9 +252,6 @@ The browser presses the left mouse button at a pickup point inside the element, 
 
 **Returns:** `*DragResult` — *DragResult with the resolved frameId, backendNodeId and the
 
-**Throws:**
-- `UNKNOWN_ERROR` — the drag could not be performed
-
 ```go
 _, err := browser.DragBy(ctx, browserscale.CSS(".slider .handle"), 120, 0)
 if err != nil {
@@ -285,13 +259,15 @@ if err != nil {
 }
 ```
 
+**See also:** DragError for the occlusion-failure detail
+
 ### `DragTo(target *Locator, absoluteX float64, absoluteY float64) → *DragResult`
 
 *method on `CloudBrowser`*
 
 DragTo picks up the target and drops it at absolute root-viewport coordinates.
 
-Same gesture as CloudBrowser.DragBy, but the drop destination is in page coordinates rather than relative to the pickup point.
+Same gesture and same source acquisition as CloudBrowser.DragBy, but the drop destination is in page coordinates rather than relative to the pickup point.
 
 **Parameters:**
 - `target` (`*Locator`) — locator describing the element to pick up
@@ -300,15 +276,14 @@ Same gesture as CloudBrowser.DragBy, but the drop destination is in page coordin
 
 **Returns:** `*DragResult` — *DragResult with the resolved frameId, backendNodeId and the
 
-**Throws:**
-- `UNKNOWN_ERROR` — the drag could not be performed
-
 ```go
 _, err := browser.DragTo(ctx, browserscale.CSS(".card"), 800, 400)
 if err != nil {
     log.Fatal(err)
 }
 ```
+
+**See also:** DragError for the occlusion-failure detail
 
 ### `Evaluate(expression string) → *EvaluateResult`
 
@@ -318,13 +293,12 @@ Evaluate runs a JavaScript expression in the page's main frame.
 
 The expression's return value is JSON-serialized server-side and parsed eagerly into EvaluateResult.Value. When the expression returns a DOM element the EvaluateResult.Value is left empty and the element metadata (BackendNodeId, IsVisible, Bounds) is populated instead — use Node(id) in subsequent calls to act on it.
 
+A falsy answer and a broken expression are different outcomes. Returning null, false or undefined is a successful evaluation and comes back as a result; an expression that throws or will not compile comes back as a *CommandError, so a typo can never read as "the page says null".
+
 **Parameters:**
 - `expression` (`string`) — JavaScript expression evaluated in the main frame
 
 **Returns:** `*EvaluateResult` — *EvaluateResult with either Value (for non-Element returns) or
-
-**Throws:**
-- `UNKNOWN_ERROR` — the expression threw or could not be compiled
 
 ```go
 res, err := browser.Evaluate(ctx, "document.title")
@@ -333,6 +307,20 @@ if err != nil {
 }
 fmt.Println(res.Value)
 ```
+
+```go
+// Telling a false answer from a broken expression.
+res, err := browser.Evaluate(ctx, "window.__ready === true")
+var ce *browserscale.CommandError
+if errors.As(err, &ce) {
+    log.Fatalf("expression is broken: %v", ce)
+}
+if res.Value != true {
+    // legitimately not ready yet
+}
+```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `EvaluateInFrame(frameId string, expression string) → *EvaluateResult`
 
@@ -349,14 +337,13 @@ Same semantics as CloudBrowser.Evaluate but targets a specific frame instead of 
 
 **Returns:** `*EvaluateResult` — *EvaluateResult with either Value (for non-Element returns) or
 
-**Throws:**
-- `UNKNOWN_ERROR` — the expression threw or could not be compiled
-
 ```go
 pages, _ := browser.GetPages(ctx)
 iframeId := pages[0].FrameTree.Children[0].FrameId
 _, _ = browser.EvaluateInFrame(ctx, iframeId, "location.href")
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `Fill(target *Locator, text string) → *ElementResult`
 
@@ -364,7 +351,11 @@ _, _ = browser.EvaluateInFrame(ctx, iframeId, "location.href")
 
 Fill clicks the target and types text into it, appending to any existing content.
 
-The browser scrolls the element into view, moves the cursor along a human-like path, clicks to focus, then types the text character-by- character with QWERTZ keyboard simulation and human-like timing.
+The field is acquired with the same smart click as CloudBrowser.Click: re-located, scrolled into view, settled and hit-tested within the timeout budget, so it does not have to be present or ready yet. The cursor then moves along a human-like path and clicks to focus.
+
+Typing is per-key rather than a value assignment: keyDown, char and keyUp for every character, with the keycodes of the layout that matches the session's region and human cadence between them. If the field already holds text the caret is moved to the end first, so appended input lands after the existing content instead of wherever the caret happened to sit.
+
+Fill is strictly target-bound. If something else takes focus mid-typing, the remaining characters are never typed into the thief — the browser tries to re-focus the target and otherwise fails with "focus_stolen", naming the element that holds focus instead so you can deal with it (a consent button, a different field). For stream-style typing that is *supposed* to move between fields, such as an OTP input that auto-advances, use CloudBrowser.Type instead.
 
 To overwrite the field instead of appending, use CloudBrowser.FillWith with ClearFirst: true.
 
@@ -375,11 +366,6 @@ At is not a valid target — Fill requires an actual element.
 - `text` (`string`) — text to type into the element
 
 **Returns:** `*ElementResult` — *ElementResult with success, resolved frameId, backendNodeId
-
-**Throws:**
-- `INVALID_LOCATOR` — target is empty or has multiple targets set
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `TIMEOUT` — the operation exceeded the server-side timeout
 
 ```go
 res, err := browser.Fill(ctx, browserscale.CSS("input[name=email]"), "user@example.com")
@@ -402,7 +388,11 @@ _ = res
 
 FillWith is the customizable variant of CloudBrowser.Fill.
 
-The browser scrolls the element into view, moves the cursor along a human-like path, clicks to focus, then types the text character-by- character with QWERTZ keyboard simulation and human-like timing.
+The field is acquired with the same smart click as CloudBrowser.Click: re-located, scrolled into view, settled and hit-tested within the timeout budget, so it does not have to be present or ready yet. The cursor then moves along a human-like path and clicks to focus.
+
+Typing is per-key rather than a value assignment: keyDown, char and keyUp for every character, with the keycodes of the layout that matches the session's region and human cadence between them. If the field already holds text the caret is moved to the end first, so appended input lands after the existing content instead of wherever the caret happened to sit.
+
+Fill is strictly target-bound. If something else takes focus mid-typing, the remaining characters are never typed into the thief — the browser tries to re-focus the target and otherwise fails with "focus_stolen", naming the element that holds focus instead so you can deal with it (a consent button, a different field). For stream-style typing that is *supposed* to move between fields, such as an OTP input that auto-advances, use CloudBrowser.Type instead.
 
 To overwrite the field instead of appending, use CloudBrowser.FillWith with ClearFirst: true.
 
@@ -414,11 +404,6 @@ At is not a valid target — Fill requires an actual element.
 - `opts` (`FillOpts`) — fill customization; see FillOpts
 
 **Returns:** `*ElementResult` — *ElementResult with success, resolved frameId, backendNodeId
-
-**Throws:**
-- `INVALID_LOCATOR` — target is empty or has multiple targets set
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `TIMEOUT` — the operation exceeded the server-side timeout
 
 ```go
 // Wipe the field first, then type fresh content.
@@ -453,9 +438,6 @@ Only output produced from now on arrives — lines printed before the subscripti
 
 **Returns:** `*ScriptFollow` — *ScriptFollow handle for stopping the subscription
 
-**Throws:**
-- `UNKNOWN_ERROR` — onEvent is nil, or the subscription could not be opened
-
 ```go
 follow, err := browser.FollowScript(ctx, runId, func(ev browserscale.ScriptEvent) {
     if ev.Log != nil { fmt.Println(ev.Log.Message) }
@@ -473,9 +455,6 @@ GetAuthSession exports the signed-in primary account and DBSC sessions of this b
 Returns nil, nil when the context has neither a signed-in account nor DBSC sessions.
 
 **Returns:** `*AuthSession` — *AuthSession, or nil when there is nothing to export
-
-**Throws:**
-- `UNKNOWN_ERROR` — the auth session could not be read
 
 ```go
 auth, err := browser.GetAuthSession(ctx)
@@ -496,9 +475,6 @@ if auth == nil {
 GetCookies returns all cookies currently stored in this session's browser context.
 
 **Returns:** `[]CookieParam` — []CookieParam, one per cookie in the context
-
-**Throws:**
-- `UNKNOWN_ERROR` — the cookies could not be read
 
 ```go
 cookies, err := browser.GetCookies(ctx)
@@ -524,9 +500,6 @@ The shape matches Chrome DevTools' Protocol DOM.Node — useful for piping into 
 
 **Returns:** `string` — JSON string in CDP DOM.Node shape
 
-**Throws:**
-- `UNKNOWN_ERROR` — the DOM could not be retrieved
-
 ```go
 tree, err := browser.GetDOM(ctx, "", -1)
 if err != nil {
@@ -550,8 +523,7 @@ On an <iframe>/<frame>/<object> the one child is the document it hosts, and this
 
 **Returns:** `*DomChildren` — *DomChildren with the child list as JSON and the sequence it is
 
-**Throws:**
-- `UNKNOWN_ERROR` — the children could not be read
+**See also:** CommandError for recovering the code with errors.As
 
 ### `GetDOMHash(frameId string) → string`
 
@@ -565,9 +537,6 @@ Computing a hash is much cheaper than transferring the full tree — pair this w
 - `frameId` (`string`) — id of the frame to hash; empty targets the main frame
 
 **Returns:** `string` — 16-char hex string (the first 8 bytes of sha256 of the DOM JSON)
-
-**Throws:**
-- `UNKNOWN_ERROR` — the hash could not be computed
 
 ```go
 hash, err := browser.GetDOMHash(ctx, "")
@@ -592,9 +561,6 @@ Prefer it over CloudBrowser.GetDOMHash, which serializes the whole tree just to 
 
 **Returns:** `uint64` — uint64 monotonic counter
 
-**Throws:**
-- `UNKNOWN_ERROR` — the revision could not be read
-
 ### `GetObservation() → string`
 
 *method on `CloudBrowser`*
@@ -611,9 +577,6 @@ On what to do with the result: backendNodeId (the 47 above) is a handle for this
 
 **Returns:** `string` — the observation in the requested format, ready to hand to a model
 
-**Throws:**
-- `UNKNOWN_ERROR` — the observation could not be produced
-
 ```go
 obs, err := browser.GetObservation(ctx)
 if err != nil {
@@ -621,6 +584,8 @@ if err != nil {
 }
 fmt.Println(obs)
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `GetObservationWith(opts ObservationOpts) → string`
 
@@ -642,9 +607,6 @@ On what to do with the result: backendNodeId (the 47 above) is a handle for this
 
 **Returns:** `string` — the observation in the requested format, ready to hand to a model
 
-**Throws:**
-- `UNKNOWN_ERROR` — the observation could not be produced
-
 ```go
 // Only what is on screen right now, as structured JSON.
 obs, err := browser.GetObservationWith(ctx, browserscale.ObservationOpts{
@@ -658,6 +620,8 @@ obs, err = browser.GetObservationWith(ctx, browserscale.ObservationOpts{
 })
 ```
 
+**See also:** CommandError for recovering the code with errors.As
+
 ### `GetPages() → []*PageInfo`
 
 *method on `CloudBrowser`*
@@ -667,9 +631,6 @@ GetPages returns all open pages (tabs and popups) for this session's browser con
 Each PageInfo carries the page's URL, title, viewport and a full nested frame tree (out-of-process iframes are children of the page's main frame).
 
 **Returns:** `[]*PageInfo` — []*PageInfo for every page currently open in the context
-
-**Throws:**
-- `UNKNOWN_ERROR` — the pages could not be enumerated
 
 ```go
 pages, err := browser.GetPages(ctx)
@@ -690,9 +651,6 @@ GetSelection returns the current text selection.
 Walks every frame and returns the first non-empty selection found — useful for "copy what the user highlighted" flows. Returns an empty string when nothing is selected anywhere.
 
 **Returns:** `string` — the selected text, or "" when nothing is selected
-
-**Throws:**
-- `UNKNOWN_ERROR` — the selection could not be read
 
 ```go
 sel, err := browser.GetSelection(ctx)
@@ -715,9 +673,6 @@ The storage database is read directly in the browser process, so no page needs t
 
 **Returns:** `[]StorageOriginEntry` — []StorageOriginEntry, one per origin with localStorage data
 
-**Throws:**
-- `UNKNOWN_ERROR` — the storage could not be read
-
 ```go
 storage, err := browser.GetStorage(ctx, "")
 if err != nil {
@@ -739,9 +694,6 @@ GetStreamConfig returns the ICE servers (TURN URL + short-lived credentials) to 
 Live streaming is a two-step, client-offerer handshake: call GetStreamConfig, build your peer with the returned servers, create an offer, then pass its SDP to CloudBrowser.StartStream and apply the returned answer.
 
 **Returns:** `[]IceServer` — the ICE servers for the client RTCPeerConnection
-
-**Throws:**
-- `UNKNOWN_ERROR` — TURN is not configured on the server
 
 ```go
 ice, err := browser.GetStreamConfig(ctx)
@@ -769,9 +721,6 @@ Useful for visual debugging of agent flows — the overlay stays until the next 
 - `backendNodeId` (`int32`) — id of the node to highlight, or <= 0 to clear
 - `frameId` (`string`) — id of the frame the node lives in; empty targets the main frame
 
-**Throws:**
-- `UNKNOWN_ERROR` — the highlight could not be applied
-
 ```go
 if err := browser.HighlightNode(ctx, res.BackendNodeId, res.FrameId); err != nil {
     log.Fatal(err)
@@ -789,14 +738,13 @@ No individual key events are dispatched; the entire string is committed at once 
 **Parameters:**
 - `text` (`string`) — the text to insert at the caret
 
-**Throws:**
-- `UNKNOWN_ERROR` — the text could not be inserted
-
 ```go
 if err := browser.InsertText(ctx, "hello world"); err != nil {
     log.Fatal(err)
 }
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `InspectAtPosition(x float64, y float64) → *InspectResult`
 
@@ -811,9 +759,6 @@ Mirrors what the live-UI overlay does on hover. Elements with pointer-events:non
 - `y` (`float64`) — viewport-relative y in CSS pixels
 
 **Returns:** `*InspectResult` — *InspectResult with the resolved backendNodeId, frameId, tag
-
-**Throws:**
-- `UNKNOWN_ERROR` — the hit-test failed
 
 ```go
 res, err := browser.InspectAtPosition(ctx, 200, 300)
@@ -848,9 +793,6 @@ Only runs in flight — a finished run is reported once on the event stream and 
 
 **Returns:** `[]ScriptRunInfo` — []ScriptRunInfo one entry per run still executing
 
-**Throws:**
-- `UNKNOWN_ERROR` — the session could not be queried
-
 ```go
 runs, err := browser.ListScriptRuns(ctx)
 if err != nil { log.Fatal(err) }
@@ -873,13 +815,12 @@ Registers a one-shot interceptor that intercepts the next request to url and rep
 - `headers` (`[]Header`) — extra response headers (Content-Type is set automatically)
 - `statusCode` (`int32`) — HTTP status code to serve; 0 means 200
 
-**Throws:**
-- `UNKNOWN_ERROR` — the interceptor could not be installed
-
 ```go
 _ = browser.LoadHTML(ctx, "https://example.com", "<h1>hi</h1>", nil, 0)
 _, _ = browser.Navigate(ctx, "https://example.com", 0)
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `MirrorDom(opts DomMirrorOptions, onChange DomChangeHandler, onResync DomResyncHandler) → *DomMirror`
 
@@ -900,9 +841,6 @@ The subscription is established before the snapshot is taken, so no change betwe
 
 **Returns:** `*DomMirror` — *DomMirror holding the tree
 
-**Throws:**
-- `UNKNOWN_ERROR` — onChange is nil, or the mirror could not be started
-
 ```go
 mirror, err := browser.MirrorDom(ctx, browserscale.DomMirrorOptions{Pierce: true},
     func(m *browserscale.DomMirror) {
@@ -916,6 +854,8 @@ defer mirror.Stop(ctx)
 body := mirror.Node(mirror.MainFrameId(), bodyId)
 _ = mirror.Expand(ctx, body, 0)
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `ModifyRequest(urlPattern string, body string, timeoutMs float64, mods []HeaderModification) → *InterceptedRequest`
 
@@ -933,9 +873,6 @@ One-shot: consumes the first matching request. Pass nil/empty mods to leave head
 
 **Returns:** `*InterceptedRequest` — *InterceptedRequest carrying the method/URL/headers/body that
 
-**Throws:**
-- `UNKNOWN_ERROR` — no matching request appeared within the timeout
-
 ```go
 req, err := browser.ModifyRequest(ctx, "*/api/me", "", 5000, []browserscale.HeaderModification{
     {Action: browserscale.HeaderModificationAdd, Name: "X-Trace", Value: "abc123"},
@@ -946,6 +883,8 @@ if err != nil {
 }
 fmt.Println("forwarded headers:", req.Headers)
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `MoveTo(target *Locator) → *ElementResult`
 
@@ -960,15 +899,14 @@ The browser scrolls the target into view first if necessary, then animates the c
 
 **Returns:** `*ElementResult` — *ElementResult with the resolved frameId, backendNodeId,
 
-**Throws:**
-- `UNKNOWN_ERROR` — the move could not be completed
-
 ```go
 _, err := browser.MoveTo(ctx, browserscale.CSS("nav .menu"))
 if err != nil {
     log.Fatal(err)
 }
 ```
+
+**See also:** MoveError for recovering the code with errors.As
 
 ### `Navigate(url string, timeoutMs float64) → *NavigateResult`
 
@@ -984,15 +922,14 @@ Returns once the primary main-frame navigation commits (the response is received
 
 **Returns:** `*NavigateResult` — *NavigateResult with the final resolved URL and the frameId of
 
-**Throws:**
-- `UNKNOWN_ERROR` — the navigation failed or timed out
-
 ```go
 _, err := browser.Navigate(ctx, "https://example.com", 0)
 if err != nil {
     log.Fatal(err)
 }
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `PressKey(key string, code string, modifiers int32, location int32)`
 
@@ -1008,14 +945,13 @@ Only the keydown half is dispatched — pair with CloudBrowser.ReleaseKey for a 
 - `modifiers` (`int32`) — bit-flag combination: Alt=1, Ctrl=2, Meta=4, Shift=8
 - `location` (`int32`) — DOM KeyboardEvent.location: 0=standard, 1=left, 2=right, 3=numpad
 
-**Throws:**
-- `UNKNOWN_ERROR` — the event could not be dispatched
-
 ```go
 // Ctrl+A
 _ = browser.PressKey(ctx, "a", "KeyA", 2, 0)
 _ = browser.ReleaseKey(ctx, "a", "KeyA", 2, 0)
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `ReadCanvas(target *Locator) → *ReadCanvasResult`
 
@@ -1028,13 +964,6 @@ ReadCanvas reads the pixels of a <canvas> element directly in the renderer, bypa
 
 **Returns:** `*ReadCanvasResult` — *ReadCanvasResult with the base64 image in DataBase64, the canvas
 
-**Throws:**
-- `ELEMENT_NOT_FOUND` — no element matched the locator
-- `FRAME_NOT_FOUND` — the requested frame does not exist
-- `INVALID_LOCATOR` — target is empty, uses At(x,y), or has multiple targets
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `TIMEOUT` — the operation exceeded the server-side timeout
-
 ```go
 res, err := browser.ReadCanvas(ctx, browserscale.CSS("#game canvas"))
 if err != nil {
@@ -1044,7 +973,7 @@ img, _ := base64.StdEncoding.DecodeString(res.DataBase64)
 os.WriteFile("canvas.png", img, 0o644)
 ```
 
-**See also:** CloudBrowser.ReadCanvasWith for format, quality, or a sub-rectangle
+**See also:** CloudBrowser.ReadCanvasWith for format, quality, or a sub-rectangle · CommandError for recovering the code with errors.As
 
 ### `ReadCanvasWith(target *Locator, opts ReadCanvasOpts) → *ReadCanvasResult`
 
@@ -1059,20 +988,13 @@ ReadCanvasWith is the customizable variant of CloudBrowser.ReadCanvas.
 
 **Returns:** `*ReadCanvasResult` — *ReadCanvasResult with the base64 image in DataBase64, the canvas
 
-**Throws:**
-- `ELEMENT_NOT_FOUND` — no element matched the locator
-- `FRAME_NOT_FOUND` — the requested frame does not exist
-- `INVALID_LOCATOR` — target is empty, uses At(x,y), or has multiple targets
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `TIMEOUT` — the operation exceeded the server-side timeout
-
 ```go
 // Read the left half of the canvas as JPEG at quality 80.
 res, err := browser.ReadCanvasWith(ctx, browserscale.CSS("canvas"),
     browserscale.ReadCanvasOpts{Format: "jpeg", Quality: 80, SW: 150, SH: 300})
 ```
 
-**See also:** CloudBrowser.ReadCanvasWith for format, quality, or a sub-rectangle
+**See also:** CloudBrowser.ReadCanvasWith for format, quality, or a sub-rectangle · CommandError for recovering the code with errors.As
 
 ### `ReleaseDomSubtree(backendNodeId int32, frameId string)`
 
@@ -1086,8 +1008,7 @@ Skipping it is not an error, it is a slow leak: the browser's revealed set only 
 - `backendNodeId` (`int32`) — the node to close
 - `frameId` (`string`) — the frame its id belongs to; empty targets the main frame
 
-**Throws:**
-- `UNKNOWN_ERROR` — the subtree could not be released
+**See also:** CommandError for recovering the code with errors.As
 
 ### `ReleaseKey(key string, code string, modifiers int32, location int32)`
 
@@ -1104,13 +1025,12 @@ Mirror of CloudBrowser.PressKey. Same parameter semantics; use this to close a p
 - `modifiers` (`int32`) — bit-flag combination: Alt=1, Ctrl=2, Meta=4, Shift=8
 - `location` (`int32`) — DOM KeyboardEvent.location: 0=standard, 1=left, 2=right, 3=numpad
 
-**Throws:**
-- `UNKNOWN_ERROR` — the event could not be dispatched
-
 ```go
 _ = browser.PressKey(ctx, "Shift", "ShiftLeft", 0, 1)
 _ = browser.ReleaseKey(ctx, "Shift", "ShiftLeft", 0, 1)
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `RemoveReaction(reactionID string) → bool`
 
@@ -1139,8 +1059,7 @@ RevealDomNode returns the chain from the main document down to a node, each ance
 
 **Returns:** `*DomPath` — *DomPath with the ancestor chain as JSON and the sequence it is
 
-**Throws:**
-- `UNKNOWN_ERROR` — the path could not be built
+**See also:** CommandError for recovering the code with errors.As
 
 ### `RunScript(source string) → *ScriptResult`
 
@@ -1156,9 +1075,6 @@ This blocks for as long as the script runs, and cannot be bounded: the run id ne
 - `source` (`string`) — JavaScript to execute; its return value comes back as JSON
 
 **Returns:** `*ScriptResult` — *ScriptResult with the return value and the script's whole console
-
-**Throws:**
-- `UNKNOWN_ERROR` — the script could not be delivered to the browser
 
 ```go
 result, err := browser.RunScript(ctx, `
@@ -1189,9 +1105,6 @@ The capture uses a one-shot surface copy (the same mechanism as CDP Page.capture
 
 **Returns:** `*ScreenshotResult` — *ScreenshotResult with the base64 image in DataBase64 and the
 
-**Throws:**
-- `UNKNOWN_ERROR` — the screenshot could not be captured
-
 ```go
 shot, err := browser.Screenshot(ctx, "png", 0)
 if err != nil {
@@ -1200,6 +1113,8 @@ if err != nil {
 img, _ := base64.StdEncoding.DecodeString(shot.DataBase64)
 os.WriteFile("page.png", img, 0o644)
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `ScrollTo(target *Locator) → *ElementResult`
 
@@ -1214,15 +1129,14 @@ Whatever scroll container is closest to the element does the scrolling — neste
 
 **Returns:** `*ElementResult` — *ElementResult with the resolved frameId, backendNodeId,
 
-**Throws:**
-- `UNKNOWN_ERROR` — the element could not be scrolled into view
-
 ```go
 _, err := browser.ScrollTo(ctx, browserscale.CSS("#footer"))
 if err != nil {
     log.Fatal(err)
 }
 ```
+
+**See also:** ScrollError for recovering the code with errors.As
 
 ### `SelectByIndex(target *Locator, index int32) → *SelectOptionResult`
 
@@ -1240,19 +1154,11 @@ At is not a valid target — Select requires an actual <select> element.
 
 **Returns:** `*SelectOptionResult` — *SelectOptionResult with the resolved selectedIndex,
 
-**Throws:**
-- `ELEMENT_NOT_FOUND` — no element matched the locator
-- `FRAME_NOT_FOUND` — the requested frame does not exist
-- `INVALID_LOCATOR` — target is empty or has multiple targets set
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `SELECT_FAILED` — the option could not be selected
-- `TIMEOUT` — the operation exceeded the server-side timeout
-
 ```go
 _, err := browser.SelectByIndex(ctx, browserscale.CSS("select#country"), 2)
 ```
 
-**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText
+**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText · SelectOptionError for recovering the code with errors.As
 
 ### `SelectByIndexWith(target *Locator, index int32, opts SelectOpts) → *SelectOptionResult`
 
@@ -1272,14 +1178,6 @@ At is not a valid target — Select requires an actual <select> element.
 
 **Returns:** `*SelectOptionResult` — *SelectOptionResult with the resolved selectedIndex,
 
-**Throws:**
-- `ELEMENT_NOT_FOUND` — no element matched the locator
-- `FRAME_NOT_FOUND` — the requested frame does not exist
-- `INVALID_LOCATOR` — target is empty or has multiple targets set
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `SELECT_FAILED` — the option could not be selected
-- `TIMEOUT` — the operation exceeded the server-side timeout
-
 ```go
 // Pick the option silently, no input/change events.
 _, err := browser.SelectByIndexWith(ctx, browserscale.CSS("select#hidden"), 0, browserscale.SelectOpts{
@@ -1287,7 +1185,7 @@ _, err := browser.SelectByIndexWith(ctx, browserscale.CSS("select#hidden"), 0, b
 })
 ```
 
-**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText
+**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText · SelectOptionError for recovering the code with errors.As
 
 ### `SelectByText(target *Locator, text string) → *SelectOptionResult`
 
@@ -1306,19 +1204,11 @@ At is not a valid target — Select requires an actual <select> element.
 
 **Returns:** `*SelectOptionResult` — *SelectOptionResult with the resolved selectedIndex,
 
-**Throws:**
-- `ELEMENT_NOT_FOUND` — no element matched the locator
-- `FRAME_NOT_FOUND` — the requested frame does not exist
-- `INVALID_LOCATOR` — target is empty or has multiple targets set
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `SELECT_FAILED` — the option could not be selected
-- `TIMEOUT` — the operation exceeded the server-side timeout
-
 ```go
 _, err := browser.SelectByText(ctx, browserscale.CSS("select#country"), "Germany")
 ```
 
-**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText
+**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText · SelectOptionError for recovering the code with errors.As
 
 ### `SelectByTextWith(target *Locator, text string, opts SelectOpts) → *SelectOptionResult`
 
@@ -1338,21 +1228,13 @@ At is not a valid target — Select requires an actual <select> element.
 
 **Returns:** `*SelectOptionResult` — *SelectOptionResult with the resolved selectedIndex,
 
-**Throws:**
-- `ELEMENT_NOT_FOUND` — no element matched the locator
-- `FRAME_NOT_FOUND` — the requested frame does not exist
-- `INVALID_LOCATOR` — target is empty or has multiple targets set
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `SELECT_FAILED` — the option could not be selected
-- `TIMEOUT` — the operation exceeded the server-side timeout
-
 ```go
 _, err := browser.SelectByTextWith(ctx, browserscale.CSS("select#country"), "Germany", browserscale.SelectOpts{
     NoEvents: true,
 })
 ```
 
-**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText
+**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText · SelectOptionError for recovering the code with errors.As
 
 ### `SelectByValue(target *Locator, value string) → *SelectOptionResult`
 
@@ -1371,19 +1253,11 @@ At is not a valid target — Select requires an actual <select> element.
 
 **Returns:** `*SelectOptionResult` — *SelectOptionResult with the resolved selectedIndex,
 
-**Throws:**
-- `ELEMENT_NOT_FOUND` — no element matched the locator
-- `FRAME_NOT_FOUND` — the requested frame does not exist
-- `INVALID_LOCATOR` — target is empty or has multiple targets set
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `SELECT_FAILED` — the option could not be selected
-- `TIMEOUT` — the operation exceeded the server-side timeout
-
 ```go
 _, err := browser.SelectByValue(ctx, browserscale.CSS("select#country"), "DE")
 ```
 
-**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText
+**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText · SelectOptionError for recovering the code with errors.As
 
 ### `SelectByValueWith(target *Locator, value string, opts SelectOpts) → *SelectOptionResult`
 
@@ -1403,21 +1277,13 @@ At is not a valid target — Select requires an actual <select> element.
 
 **Returns:** `*SelectOptionResult` — *SelectOptionResult with the resolved selectedIndex,
 
-**Throws:**
-- `ELEMENT_NOT_FOUND` — no element matched the locator
-- `FRAME_NOT_FOUND` — the requested frame does not exist
-- `INVALID_LOCATOR` — target is empty or has multiple targets set
-- `PAGE_NOT_ALIVE` — the page has been closed
-- `SELECT_FAILED` — the option could not be selected
-- `TIMEOUT` — the operation exceeded the server-side timeout
-
 ```go
 _, err := browser.SelectByValueWith(ctx, browserscale.CSS("select#country"), "DE", browserscale.SelectOpts{
     NoEvents: true,
 })
 ```
 
-**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText
+**See also:** CloudBrowser.SelectByIndexWith for suppressing events or · CloudBrowser.SelectByValue, CloudBrowser.SelectByText · SelectOptionError for recovering the code with errors.As
 
 ### `SessionId() → string`
 
@@ -1438,9 +1304,6 @@ Call before navigating. Pair with SetCookies / SetStorage to fully restore a per
 **Parameters:**
 - `session` (`AuthSession`) — session as returned by GetAuthSession
 
-**Throws:**
-- `UNKNOWN_ERROR` — the auth session could not be written
-
 ```go
 _ = browser.SetAuthSession(ctx, *saved)
 _ = browser.Navigate(ctx, "https://mail.google.com")
@@ -1456,9 +1319,6 @@ Any request whose URL matches one of the supplied patterns is blocked before it 
 
 **Parameters:**
 - `patterns` (`[]string`) — URL wildcards to block; nil or empty clears the list
-
-**Throws:**
-- `UNKNOWN_ERROR` — the blocklist could not be applied
 
 ```go
 _ = browser.SetBlockList(ctx, []string{
@@ -1477,9 +1337,6 @@ Existing cookies with the same (name, domain, path) tuple are overwritten. Pass 
 
 **Parameters:**
 - `cookies` (`[]CookieParam`) — cookies to write; empty slice is a no-op
-
-**Throws:**
-- `UNKNOWN_ERROR` — the cookies could not be written
 
 ```go
 secure := true
@@ -1513,9 +1370,6 @@ Takes effect for new requests immediately; in-flight requests keep their origina
 - `proxyUsername` (`string`) — proxy auth user (empty for unauthenticated proxies)
 - `proxyPassword` (`string`) — proxy auth password (empty for unauthenticated proxies)
 
-**Throws:**
-- `UNKNOWN_ERROR` — the proxy could not be applied
-
 ```go
 _ = browser.SetProxy(ctx, "proxy.example.com", 8080, "user", "pass")
 ```
@@ -1532,9 +1386,6 @@ Useful for replaying frozen page assets (HTML/JS/CSS/images) without hitting the
 - `blobName` (`string`) — server-side identifier of the snapshot to serve from
 - `patterns` (`[]string`) — URL wildcards to redirect to the cache; nil/empty disables
 
-**Throws:**
-- `UNKNOWN_ERROR` — the static paths could not be configured
-
 ```go
 _ = browser.SetStaticPaths(ctx, "snap-2026-05", []string{"*.example.com/*"})
 ```
@@ -1549,9 +1400,6 @@ Accepts the same structure GetStorage returns, so a dump can be fed back verbati
 
 **Parameters:**
 - `storage` (`[]StorageOriginEntry`) — entries to write, grouped by origin
-
-**Throws:**
-- `UNKNOWN_ERROR` — the storage could not be written
 
 ```go
 _ = browser.SetStorage(ctx, []browserscale.StorageOriginEntry{
@@ -1579,9 +1427,6 @@ Detection covers the common challenge types you run into in the wild. The challe
 
 **Returns:** `string` — empty string on success — the solution is applied server-side
 
-**Throws:**
-- `UNKNOWN_ERROR` — no captcha appeared within timeoutMs, or the
-
 ```go
 if _, err := browser.SolveCaptcha(ctx, 0, 2); err != nil {
     log.Fatal(err)
@@ -1601,8 +1446,7 @@ Calling it again restarts the mirror, which is also the recovery path after a re
 
 **Returns:** `*DomSnapshot` — *DomSnapshot with the main document, its frame and the baseline
 
-**Throws:**
-- `UNKNOWN_ERROR` — the mirror could not be started
+**See also:** CommandError for recovering the code with errors.As
 
 ### `StartNetworkCapture(opts NetworkCaptureOptions)`
 
@@ -1614,9 +1458,6 @@ Use it when the reader lives somewhere else — another process, or a later Conn
 
 **Parameters:**
 - `opts` (`NetworkCaptureOptions`) — which requests to capture and whether to keep bodies
-
-**Throws:**
-- `UNKNOWN_ERROR` — the capture could not be started
 
 ### `StartScript(source string, onEvent ScriptEventHandler) → *ScriptRun`
 
@@ -1633,9 +1474,6 @@ Subscribing has to happen before the launch, because a detached run's output is 
 - `onEvent` (`ScriptEventHandler`) — called per log line and once for the outcome; see
 
 **Returns:** `*ScriptRun` — *ScriptRun handle for awaiting or cancelling the run
-
-**Throws:**
-- `UNKNOWN_ERROR` — onEvent is nil, or the run could not be started
 
 ```go
 run, err := browser.StartScript(ctx, source, func(ev browserscale.ScriptEvent) {
@@ -1660,14 +1498,13 @@ StartStream answers your WebRTC SDP offer and starts streaming the page as a vid
 
 **Returns:** `StreamAnswer` — the SDP answer plus the viewport to map input coordinates into
 
-**Throws:**
-- `UNKNOWN_ERROR` — the offer was empty, TURN is unconfigured, or the
-
 ```go
 stream, err := browser.StartStream(ctx, offer.SDP)
 if err != nil { log.Fatal(err) }
 // peer.SetRemoteDescription({type: "answer", sdp: stream.AnswerSDP}) …
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `StopDomMirror()`
 
@@ -1675,8 +1512,7 @@ if err != nil { log.Fatal(err) }
 
 StopDomMirror stops the page's mirror, every frame of it. Idempotent.
 
-**Throws:**
-- `UNKNOWN_ERROR` — the mirror could not be stopped
+Reports only transport failures - a dead session, a page that is gone, a broken connection. Stopping a mirror that is not running is a no-op rather than a failure, so there are no error codes to branch on.
 
 ### `StopNetworkCapture() → bool`
 
@@ -1685,9 +1521,6 @@ StopDomMirror stops the page's mirror, every frame of it. Idempotent.
 StopNetworkCapture disarms the session's capture.
 
 **Returns:** `bool` — bool reporting whether a capture was running, and an error
-
-**Throws:**
-- `UNKNOWN_ERROR` — the capture could not be stopped
 
 ### `StopScripts(runId string) → int`
 
@@ -1702,9 +1535,6 @@ An empty runId cancels every run in the session, which is the only form availabl
 
 **Returns:** `int` — int how many runs were cancelled; 0 when the id named nothing in
 
-**Throws:**
-- `UNKNOWN_ERROR` — the cancel could not be delivered
-
 ```go
 _, err := browser.StopScripts(ctx, "") // abandon everything running
 ```
@@ -1715,8 +1545,7 @@ _, err := browser.StopScripts(ctx, "") // abandon everything running
 
 StopStream tears down the live video stream for the session's page. It is safe to call even if no stream is running.
 
-**Throws:**
-- `UNKNOWN_ERROR` — the stream could not be stopped
+Reports only transport failures - a dead session, a page that is gone, a broken connection. Stopping a stream that is not running is a no-op rather than a failure, so there are no error codes to branch on.
 
 ```go
 if err := browser.StopStream(ctx); err != nil { log.Fatal(err) }
@@ -1734,9 +1563,6 @@ Stopping the returned view detaches this reader and leaves the capture running, 
 - `onExchange` (`NetworkExchangeHandler`) — called per exchange; see NetworkExchangeHandler for the
 
 **Returns:** `*NetworkCapture` — *NetworkCapture attached to whatever capture is running; onExchange
-
-**Throws:**
-- `UNKNOWN_ERROR` — onExchange is nil, or the subscription could not be opened
 
 ### `Timezone() → string`
 
@@ -1760,9 +1586,6 @@ Nothing is focused for you: CloudBrowser.Click (or Fill) the field first, or oth
 - `text` (`string`) — the text to type as real key events
 - `clearFirst` (`bool`) — when true, clears the focused field (Ctrl+A, Delete) first
 
-**Throws:**
-- `UNKNOWN_ERROR` — the page/context was torn down mid-stream
-
 ```go
 // OTP field that auto-advances across boxes.
 _, _ = browser.Click(ctx, browserscale.CSS("input.otp-0"))
@@ -1779,7 +1602,7 @@ Wait blocks until any of the supplied locators matches.
 
 Pass one or more Locators (built with CSS, JS, …) plus optional wait-level arguments such as Timeout. When several locators are supplied, the first one to match wins; the others are abandoned.
 
-Defaults applied automatically: - timeout: DefaultWaitTimeoutMs (30s) — override with Timeout - per-locator visible/steady: DefaultVisible (true) and DefaultSteadyMs (500) for CSS and JS locators. For JS expressions returning a non-Element value (bool/string/number/object) both flags are no-ops. Override with Locator.Visible / Locator.Steady on individual locators.
+Anything left unset is defaulted by the API, not by this SDK: - timeout: 30s — override with Timeout - per-locator visible and steady: visibility required, 500ms of settling. For JS expressions returning a non-Element value (bool/string/number/ object) both are no-ops. Override with Locator.Visible / Locator.Steady on individual locators.
 
 Node and At are not valid wait conditions — they only make sense as action targets — and produce an error at send time.
 
@@ -1823,9 +1646,6 @@ Returns the matched pattern's index and the captured request. When patternsi.Abo
 
 **Returns:** `int32, *InterceptedRequest` — int32 index of the matched pattern, *InterceptedRequest with
 
-**Throws:**
-- `UNKNOWN_ERROR` — the wait timed out or no patterns were supplied
-
 ```go
 idx, req, err := browser.WaitForAnyRequest(ctx, 5000, []browserscale.RequestPattern{
     {URL: "*/api/login"},
@@ -1836,6 +1656,8 @@ if err != nil {
 _ = idx
 fmt.Println(req.Method, req.Url)
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `WaitForAnyResponse(timeoutMs float64, patterns []RequestPattern) → int32, *InterceptedResponse`
 
@@ -1852,9 +1674,6 @@ Same shape as CloudBrowser.WaitForAnyRequest but on the response phase. When pat
 
 **Returns:** `int32, *InterceptedResponse` — int32 index of the matched pattern, *InterceptedResponse with
 
-**Throws:**
-- `UNKNOWN_ERROR` — the wait timed out or no patterns were supplied
-
 ```go
 idx, resp, err := browser.WaitForAnyResponse(ctx, 5000, []browserscale.RequestPattern{
     {URL: "*/api/login"},
@@ -1865,6 +1684,8 @@ if err != nil {
 _ = idx
 fmt.Println(resp.StatusCode)
 ```
+
+**See also:** CommandError for recovering the code with errors.As
 
 ## Locator
 
@@ -1913,7 +1734,7 @@ _, _ = browser.Click(ctx, browserscale.CSS("button").InFrame(iframeId))
 
 Steady requires the element to keep a stable position and size for at least ms milliseconds before the wait matches.
 
-Pass 0 to disable the default DefaultSteadyMs (500). Has no effect for JS expressions that return a non-Element value, nor when the Locator is used as an action target.
+Settling defaults to 500ms, so pass 0 to match the instant the element is found. Has no effect for JS expressions that return a non-Element value, nor when the Locator is used as an action target.
 
 **Parameters:**
 - `ms` (`float64`) — steady-state duration in milliseconds; 0 disables
@@ -1930,7 +1751,7 @@ _, _ = browser.Wait(ctx, browserscale.CSS(".banner").Steady(0))
 
 Visible enforces or disables the visibility check for this Locator's wait condition.
 
-Pass false to opt out of the default DefaultVisible (true). Has no effect when the Locator is used as an action target — actions never check visibility before dispatching.
+Visibility is required by default, so pass false to wait for DOM presence alone. Has no effect when the Locator is used as an action target — actions never check visibility before dispatching.
 
 **Parameters:**
 - `v` (`bool`) — true to require visibility, false to skip the check
@@ -2059,9 +1880,6 @@ Shorthand for ConnectSession with the URL and id already in hand. The returned h
 
 **Returns:** `*CloudBrowser` — *CloudBrowser attached to the session
 
-**Throws:**
-- `UNKNOWN_ERROR` — the gRPC connection could not be opened
-
 ```go
 browsers, _ := browserscale.ListBrowsers(ctx, apiKey)
 browser, err := browsers[0].Connect(ctx, apiKey)
@@ -2090,8 +1908,13 @@ Collapse stops reporting changes inside a node, called when the user closes it. 
 **Parameters:**
 - `node` (`*DomNode`) — the node to close
 
-**Throws:**
-- `UNKNOWN_ERROR` — the subtree could not be released
+**See also:** CommandError for recovering the code with errors.As
+
+### `Err()`
+
+*method on `DomMirror`*
+
+Err reports why the mirror ended. It returns nil while it is still running, and after a clean stop, a cancelled context, or the session ending normally.
 
 ### `Expand(node *DomNode, depth int32)`
 
@@ -2107,8 +1930,7 @@ A node that left the tree while the call was in flight is not an error and chang
 - `node` (`*DomNode`) — the node to open, from DomMirror.Root or DomMirror.Node
 - `depth` (`int32`) — levels below the node; 0 uses the server default of 1
 
-**Throws:**
-- `UNKNOWN_ERROR` — the children could not be read
+**See also:** CommandError for recovering the code with errors.As
 
 ### `FrameIds() → []string`
 
@@ -2137,14 +1959,25 @@ MainFrameId returns the page's main frame.
 
 **Returns:** `string`
 
+### `Node(frameId string, backendNodeId int32) → *DomNode`
+
+*method on `DomMirror`*
+
+Node looks up a node by its address, or nil if the mirror does not hold it.
+
+**Parameters:**
+- `frameId` (`string`)
+- `backendNodeId` (`int32`)
+
+**Returns:** `*DomNode`
+
 ### `Resync()`
 
 *method on `DomMirror`*
 
 Resync throws away the local copy of the whole page and fetches a fresh one. It happens automatically whenever the browser says the copy is void, so you rarely need to call it.
 
-**Throws:**
-- `UNKNOWN_ERROR` — the page could not be re-read; the mirror then ends
+**See also:** CommandError for recovering the code with errors.As
 
 ### `Reveal(backendNodeId int32, frameId string) → []*DomNode`
 
@@ -2162,8 +1995,7 @@ The node may be in a frame nobody opened, and that works: the chain comes back c
 
 **Returns:** `[]*DomNode` — []*DomNode the ancestor chain, the main document first, or nil if the
 
-**Throws:**
-- `UNKNOWN_ERROR` — the path could not be built
+**See also:** CommandError for recovering the code with errors.As
 
 ### `Root() → *DomNode`
 
@@ -2183,21 +2015,65 @@ Seq returns the page sequence of the last change applied. One clock for the whol
 
 **Returns:** `uint64`
 
-## MoveError
+### `Stop()`
 
-MoveError is returned as the error from CloudBrowser.MoveTo when the target could not be located. A move has no occlusion notion, so this is the only semantic failure. Implements the error interface; recover with errors.As.
+*method on `DomMirror`*
 
-**Fields:**
-- `Code` (`string`) — Code is currently always "not_found".
-- `Message` (`string`) — Message is a human-readable description.
+Stop stops mirroring and detaches the reader. Idempotent, and safe to defer.
 
-### `Error() → string`
+Once it returns, the change handler is no longer running and everything it wrote is visible to the calling goroutine.
 
-*method on `MoveError`*
+To stop from inside the handler, call CloudBrowser.StopDomMirror instead: Stop waits for the handler to return, so calling it from there would wait on itself until ctx expires.
 
-Error implements the error interface.
+ctx covers the call that stops the mirror server-side, so pass a live one: the context the mirror was created with may already be cancelled by the time you stop.
 
-**Returns:** `string`
+Reports only transport failures - a dead session, a page that is gone, a broken connection. The local reader is shut down regardless, and stopping a mirror that is not running is a no-op, so there are no error codes to branch on.
+
+### `Wait()`
+
+*method on `DomMirror`*
+
+Wait blocks until the mirror ends — DomMirror.Stop, a cancelled context, a dead session or a transport failure — and returns DomMirror.Err.
+
+## NetworkCapture
+
+NetworkCapture is a running capture, returned by CloudBrowser.CaptureNetwork. Exchanges are delivered to the handler passed there; this handle only exists to stop the capture and to report how it went.
+
+### `Dropped() → uint64`
+
+*method on `NetworkCapture`*
+
+Dropped reports how many exchanges the server discarded because this reader fell behind. Anything above zero means the log has holes: make the handler cheaper, narrow Patterns, or stop capturing bodies.
+
+**Returns:** `uint64`
+
+### `Err()`
+
+*method on `NetworkCapture`*
+
+Err reports why the capture ended. It returns nil while the capture is still running, and after a clean stop, a cancelled context, or the session ending normally.
+
+### `Stop()`
+
+*method on `NetworkCapture`*
+
+Stop ends the capture. Idempotent, and safe to defer.
+
+Once it returns, the handler is no longer running and everything it wrote is visible to the calling goroutine — so a handler may append to a slice without locking, as long as you only read that slice after Stop. Views from CloudBrowser.StreamNetworkExchanges only detach — they never disarm a capture other readers may share.
+
+To stop from inside the handler, call CloudBrowser.StopNetworkCapture instead: Stop waits for the handler to return, so calling it from there would wait on itself until ctx expires.
+
+ctx covers the disarm call, so pass a live one: the context the capture was created with may already be cancelled by the time you stop.
+
+Reports only transport failures, and the local reader is shut down regardless. Disarming a capture that is not running is a no-op rather than a failure, so there are no error codes to branch on.
+
+### `Wait()`
+
+*method on `NetworkCapture`*
+
+Wait blocks until the capture ends — NetworkCapture.Stop, a cancelled context, a dead session or a transport failure — and returns NetworkCapture.Err.
+
+Use it to capture for as long as the session lives. It is not needed when you drive the browser yourself and call Stop when done.
 
 ## ScriptFollow
 
@@ -2225,6 +2101,12 @@ Stop ends the subscription. Idempotent, and safe to defer. It never cancels a ru
 
 Once it returns, the handler is no longer running and everything it wrote is visible to the calling goroutine.
 
+### `Wait()`
+
+*method on `ScriptFollow`*
+
+Wait blocks until the subscription ends — ScriptFollow.Stop, a cancelled context, a dead session or a transport failure — and returns ScriptFollow.Err.
+
 ## ScriptRun
 
 ScriptRun is a script running in the background, returned by CloudBrowser.StartScript. Its output is delivered to the handler passed there; this handle exists to wait for the outcome and to cancel the run.
@@ -2235,6 +2117,20 @@ ScriptRun is a script running in the background, returned by CloudBrowser.StartS
 
 Detach stops reading this run's output without cancelling the run. The script keeps going with nobody watching, which is what makes a detached run outlive the process that started it.
 
+### `Dropped() → uint64`
+
+*method on `ScriptRun`*
+
+Dropped reports how many events the server discarded because this reader fell behind. Anything above zero means the log has holes: make the handler cheaper, or have the script print less.
+
+**Returns:** `uint64`
+
+### `Err()`
+
+*method on `ScriptRun`*
+
+Err reports why the stream ended, or nil while it is still open and after a clean stop, a cancelled context, or the session ending normally.
+
 ### `RunId() → string`
 
 *method on `ScriptRun`*
@@ -2243,7 +2139,31 @@ RunId is the id the browser gave this run. Pass it to CloudBrowser.StopScripts t
 
 **Returns:** `string`
 
+### `Stop()`
+
+*method on `ScriptRun`*
+
+Stop cancels the run and detaches this reader. Idempotent, and safe to defer.
+
+A script that is executing is interrupted; one parked on an await unwinds at its next operation in the page. Either way the handler sees a Finished with Stopped set, unless the local reader is torn down first.
+
+ctx covers the cancel call, so pass a live one: the context the run was started with may already be cancelled by the time you stop.
+
+Reports only transport failures, and the local reader is detached regardless. Cancelling a run that has already finished is a no-op rather than a failure.
+
+### `Wait() → *ScriptFinished`
+
+*method on `ScriptRun`*
+
+Wait blocks until the run ends and returns how it ended.
+
+A script that threw is an outcome, not an error: it comes back with Success false. An error means the run's fate is unknown — the stream broke, the session died, or ctx expired before the script finished.
+
+**Returns:** `*ScriptFinished` — *ScriptFinished describing how the script ended
+
 ## Functions
+
+Package-level functions: renting, listing, connecting to and stopping sessions, and the locator constructors.
 
 ### `At(x float64, y float64) → *Locator`
 
@@ -2279,9 +2199,6 @@ Use this when you have a session id and gRPC URL from a previous RentBrowser (fo
 
 **Returns:** `*CloudBrowser` — *CloudBrowser attached to the existing session; the returned
 
-**Throws:**
-- `UNKNOWN_ERROR` — the gRPC connection could not be opened
-
 ```go
 browser, err := browserscale.ConnectSession(ctx, "grpcs://api.browserscale.cloud:443", apiKey, sessionId)
 if err != nil {
@@ -2296,7 +2213,7 @@ defer browser.Close()
 
 CSS waits for / targets an element matching the given CSS selector.
 
-When used in CloudBrowser.Wait, the returned Locator carries the SDK defaults DefaultVisible (true) and DefaultSteadyMs (500). Override per call with Locator.Visible / Locator.Steady (use `.Steady(0)` to disable the steady check).
+When used in CloudBrowser.Wait, the condition requires the element to be visible and to hold still for 500ms before it matches — the API's defaults for a condition that does not set them. Override per call with Locator.Visible / Locator.Steady (use `.Steady(0)` to disable the steady check).
 
 When used as an action target (Click, etc.) the visible/steady fields are ignored — there are no corresponding fields on the action requests.
 
@@ -2318,7 +2235,7 @@ _, _ = browser.Click(ctx, browserscale.CSS("button.submit"))
 
 JS waits for / targets the result of a JavaScript expression.
 
-Same wait defaults as CSS (DefaultVisible=true, DefaultSteadyMs=500); these only apply when the expression returns a DOM Element. For non-Element truthy values (boolean, string, number, plain object) both fields are no-ops and the condition matches as soon as the value is truthy.
+Same wait defaults as CSS (visible, 500ms steady); these only apply when the expression returns a DOM Element. For non-Element truthy values (boolean, string, number, plain object) both are no-ops and the condition matches as soon as the value is truthy.
 
 Use Locator.Visible(false) / Locator.Steady(0) on the returned Locator to opt out.
 
@@ -2345,9 +2262,6 @@ Only live sessions are listed; a stopped one is gone, not reported as ended.
 - `apiKey` (`string`) — API key whose sessions to list
 
 **Returns:** `[]BrowserInfo` — []BrowserInfo oldest first, empty when the key holds none
-
-**Throws:**
-- `UNKNOWN_ERROR` — the list API rejected the request
 
 ```go
 browsers, err := browserscale.ListBrowsers(ctx, apiKey)
@@ -2423,9 +2337,6 @@ Calls the browserscale rent endpoint with the supplied BrowserConfig, opens a gR
 
 **Returns:** `*CloudBrowser` — *CloudBrowser ready to drive the rented session; call
 
-**Throws:**
-- `UNKNOWN_ERROR` — the rent API rejected the request or the gRPC
-
 ```go
 cfg := browserscale.NewBrowserConfig("sk_…", 600, "", 0, "", "")
 browser, err := browserscale.RentBrowser(ctx, cfg)
@@ -2465,9 +2376,6 @@ Unused credits are refunded per session, as with StopBrowser.
 
 **Returns:** `int` — int how many sessions were stopped
 
-**Throws:**
-- `UNKNOWN_ERROR` — the stop API rejected the request
-
 ```go
 stopped, err := browserscale.StopAllBrowsers(ctx, apiKey)
 ```
@@ -2484,9 +2392,6 @@ Useful when a session id was persisted across processes and the rental outlived 
 - `apiKey` (`string`) — API key the session was rented with
 - `sessionId` (`string`) — id of the session to release
 
-**Throws:**
-- `UNKNOWN_ERROR` — the stop API rejected the request
-
 ```go
 _ = browserscale.StopBrowser(context.Background(), apiKey, sessionId)
 ```
@@ -2497,7 +2402,7 @@ _ = browserscale.StopBrowser(context.Background(), apiKey, sessionId)
 
 Timeout overrides the CloudBrowser.Wait timeout.
 
-When omitted, DefaultWaitTimeoutMs (30s) is used. Pass once per Wait call as one of the variadic arguments.
+When omitted, the API's default of 30s applies. Pass once per Wait call as one of the variadic arguments.
 
 **Parameters:**
 - `ms` (`float64`) — timeout in milliseconds
@@ -2508,24 +2413,9 @@ When omitted, DefaultWaitTimeoutMs (30s) is used. Pass once per Wait call as one
 _, _ = browser.Wait(ctx, browserscale.CSS("#done"), browserscale.Timeout(5000))
 ```
 
-## Types
+## Errors
 
-### `AuthSession`
-
-*struct*
-
-AuthSession is a portable snapshot of a context's signed-in Google account and/or DBSC sessions. All fields are optional so a context that only has DBSC (no primary account) or only a sign-in (no DBSC) round-trips.
-
-Pair with CloudBrowser.GetCookies / CloudBrowser.SetCookies and CloudBrowser.GetStorage / CloudBrowser.SetStorage to fully move a persona between fresh contexts. Call CloudBrowser.SetAuthSession before navigating.
-
-**Fields:**
-- `GaiaID` (`*string`) *(optional)*
-- `Email` (`*string`) *(optional)*
-- `RefreshToken` (`*string`) *(optional)*
-- `WrappedBindingKey` (`*string`) *(optional)*
-- `SigninScopedDeviceID` (`*string`) *(optional)*
-- `SyncConsent` (`*bool`) *(optional)*
-- `DbscSessions` (`[]DbscSession`)
+Returned as the error of the command they belong to, each with a stable code and typed detail. Recover them with errors.As.
 
 ### `ClickError`
 
@@ -2540,6 +2430,98 @@ res, err := browser.Click(ctx, browserscale.CSS("#buy")) var ce *browserscale.Cl
 - `Message` (`string`) — Message is a human-readable description.
 - `Occluder` (`*OccluderInfo`) *(optional)* — Occluder is the intercepting element (present for occlusion codes).
 - `EvadeAttempted` (`bool`) — EvadeAttempted reports whether a pointer reposition was tried before giving up.
+
+### `CommandError`
+
+*struct*
+
+CommandError is the failure detail of a command the browser carried out but the page would not go along with. It is the error type for the commands that have nothing to report beyond what went wrong; the richer failures have their own type (ClickError, FillError, DragError) carrying the same Code/Message pair plus their own detail.
+
+It implements the error interface, so the ordinary `res, err := ...` shape keeps working and res stays readable alongside it. Recover the code with errors.As:
+
+res, err := browser.Evaluate(ctx, "document.title.toUpperCase()") var ce *browserscale.CommandError if errors.As(err, &ce) && ce.Code == "threw" { // the expression itself is broken; ce.Message has the exception text }
+
+A CommandError never reports an outage. A dead session, a closed page or a malformed call arrive as a plain transport error instead, so errors.As matching here tells you the fault is in the page or in what you asked of it — which is the difference between retrying and fixing your code.
+
+**Fields:**
+- `Command` (`string`) — Command is the call that failed, e.g. "evaluate".
+- `Code` (`string`) — Code is machine-stable and lowercase, and is scoped to Command: the same string can mean different things for different commands, so branch on it together with the call you made.
+- `Message` (`string`) — Message is human-readable detail and may be empty. Never parse it; Code is the contract and this text is free to change.
+
+### `DragError`
+
+*struct*
+
+DragError is returned as the error from CloudBrowser.Drag variants when the source element could not be acquired/pressed. Drag picks up the source with the same smart click as CloudBrowser.Click, so a pre-drag failure is a click failure: Code/Message mirror it and the full click diagnostics live under ClickError. Implements the error interface; recover with errors.As.
+
+**Fields:**
+- `Code` (`string`) — Code is mirrored from the underlying click failure: "not_found", "occluded_no_reachable_point" or "occluded_after_evade".
+- `Message` (`string`) — Message is a human-readable description (mirrors ClickError.Message).
+- `ClickError` (`*ClickError`) *(optional)* — ClickError is the underlying click-core failure at the source pickup.
+
+### `FillError`
+
+*struct*
+
+FillError is returned as the error from CloudBrowser.Fill / CloudBrowser.FillWith when the field could not be focused/typed. Fill focuses the field with the exact same smart click as CloudBrowser.Click, so a pre-typing failure is a click failure: Code/Message mirror it and the full click diagnostics live under ClickError. It implements the error interface, so the ordinary `res, err := browser.Fill(...)` shape keeps working; recover the detail with errors.As:
+
+res, err := browser.Fill(ctx, browserscale.CSS("#email"), "a@b.com") var fe *browserscale.FillError if errors.As(err, &fe) && fe.ClickError != nil { // fe.ClickError.Occluder describes the blocker }
+
+**Fields:**
+- `Code` (`string`) — Code is the machine-stable failure code. Click-phase codes ("not_found", "occluded_no_reachable_point", "occluded_after_evade") mirror the underlying focus click, with diagnostics under ClickError. The focus codes are "focus_stolen" (another element took focus — FocusedElement names it; Fill is strictly target-bound and will not type into the thief) and "focus_lost" (focus left the target and nothing is focused). For untargeted stream typing that lets focus move (e.g. OTP), use Type.
+- `Message` (`string`) — Message is a human-readable description (mirrors ClickError.Message).
+- `ClickError` (`*ClickError`) *(optional)* — ClickError is the underlying click-core failure (locate or occlusion) that prevented focusing/typing. Present for the click-phase codes; absent for "focus_stolen"/"focus_lost".
+- `FocusedBackendNodeId` (`int32`) — FocusedBackendNodeId is the node that held focus when Fill gave up (0 if nothing was focused), for the "focus_stolen"/"focus_lost" codes.
+- `FocusedElement` (`*ElementRef`) *(optional)* — FocusedElement describes the element that grabbed focus instead of the target ("focus_stolen"), so you can act on it (e.g. a consent button).
+- `TargetEditable` (`*bool`) *(optional)* — TargetEditable and TargetValueLength report the fill target's own state at the point of failure (the focus codes): whether it is still an editable text sink and its current text length. Both nil when not reported.
+- `TargetValueLength` (`*int`) *(optional)*
+
+### `MoveError`
+
+*struct*
+
+MoveError is returned as the error from CloudBrowser.MoveTo when the target could not be located. A move has no occlusion notion, so this is the only semantic failure. Implements the error interface; recover with errors.As.
+
+**Fields:**
+- `Code` (`string`) — Code is currently always "not_found".
+- `Message` (`string`) — Message is a human-readable description.
+
+### `ScrollError`
+
+*struct*
+
+ScrollError is returned as the error from CloudBrowser.ScrollTo when the target could not be located/scrolled. Implements the error interface; recover with errors.As.
+
+**Fields:**
+- `Code` (`string`) — Code is currently always "not_found".
+- `Message` (`string`) — Message is a human-readable description.
+
+### `SelectOptionError`
+
+*struct*
+
+SelectOptionError is returned as the error from CloudBrowser SelectByXxx calls when the option could not be selected. selectOption is programmatic (no pointer gate), so it only reports semantic failures. Implements the error interface; recover with errors.As.
+
+**Fields:**
+- `Code` (`string`) — Code is "not_found" (the <select> was not located) or "option_not_found" (no option matched the requested index/value/text).
+- `Message` (`string`) — Message is a human-readable description.
+
+### `WaitError`
+
+*struct*
+
+WaitError is returned as the error from CloudBrowser.Wait when no condition matched before the deadline. It implements the error interface, so the ordinary `res, err := browser.Wait(...)` shape keeps working; recover the structured detail (including the per-condition breakdown) with errors.As:
+
+res, err := browser.Wait(ctx, browserscale.CSS(".ready")) var we *browserscale.WaitError if errors.As(err, &we) { for _, c := range we.Conditions { log.Printf("condition %d: %s", c.Index, c.State) } }
+
+**Fields:**
+- `Code` (`string`) — Code is a machine-stable failure code, currently always "timeout".
+- `Message` (`string`) — Message is a human-readable description.
+- `Conditions` (`[]WaitConditionStatus`) — Conditions holds the per-condition status, same order/length as the conditions passed to Wait.
+
+## Options
+
+Optional settings a command accepts.
 
 ### `ClickOpts`
 
@@ -2573,6 +2555,364 @@ CookieParam is one cookie returned by GetCookies / passed to SetCookies. Name, V
 - `SourceScheme` (`*string`) *(optional)*
 - `SourcePort` (`*int`) *(optional)*
 - `PartitionKey` (`*CookiePartitionKey`) *(optional)*
+
+### `DomMirrorOptions`
+
+*struct*
+
+DomMirrorOptions configures CloudBrowser.MirrorDom and CloudBrowser.StartDomMirror.
+
+**Fields:**
+- `Depth` (`int32`) — Depth is how many levels to serialize up front. 0 uses the server default of 2 — #document → <html> → <head>/<body>, enough to draw a collapsed tree. -1 walks everything and gives up what the mirror is for.
+- `Pierce` (`bool`) — Pierce descends into author shadow roots. Fixed for the life of the mirror.
+
+### `FillOpts`
+
+*struct*
+
+FillOpts customizes a CloudBrowser.FillWith call. Zero/empty values mean "use the server default".
+
+**Fields:**
+- `InFrame` (`string`) — InFrame overrides the locator's own frame. Empty = use the locator's frame (or the main frame if none). Pass a specific frameId, or AllFrames, to search elsewhere.
+- `ClearFirst` (`bool`) — ClearFirst, when true, wipes the field's existing content with Ctrl+A, Delete before typing. Default (false) appends to whatever is already there.
+- `TimeoutMs` (`*float64`) *(optional)* — TimeoutMs bounds focus acquisition (locate, scroll, settle, un-occlude) in ms, mirroring the click timeout. nil = server default (5000). It is a pointer because 0 is meaningful: browserscale.Ptr(0.0) makes Fill one-shot (no retry).
+- `SteadyMs` (`*float64`) *(optional)* — SteadyMs is the settle window in ms before the focus click, mirroring the click steady-time. nil = server default (750); browserscale.Ptr(0.0) skips settling.
+
+### `NetworkCaptureOptions`
+
+*struct*
+
+NetworkCaptureOptions configures CloudBrowser.CaptureNetwork.
+
+There is deliberately no byte-cap option: buffer sizes bound memory on a machine shared with other sessions, so the server owns them.
+
+**Fields:**
+- `Patterns` (`[]string`) — Patterns are URL wildcards to capture; nil captures every request the session makes. Prefix a pattern with "!" to exclude it, which is the short way to say "everything except this".
+- `Bodies` (`NetworkBodies`) — Bodies selects response-body capture. Empty means NetworkBodiesNone.
+- `BodyPatterns` (`[]string`) — BodyPatterns narrows body capture to a subset of the captured requests; nil applies Bodies to all of them. Use it to log every request but only keep the payloads you care about.
+
+### `ObservationOpts`
+
+*struct*
+
+ObservationOpts customizes a CloudBrowser.GetObservationWith call. Zero/empty values mean "use the server default".
+
+**Fields:**
+- `Format` (`string`) — Format is "text" (default) for the compact line format meant to be handed to a model as-is, or "json" for the structured form. Only the requested representation is built, so asking for one does not cost the other.
+- `MaxElementsPerFrame` (`int32`) — MaxElementsPerFrame caps emitted elements per frame. 0 = server default (800). This is a safety net against runaway documents; MaxTotalTokens is the limit that normally binds.
+- `MaxTextLength` (`int32`) — MaxTextLength caps human-readable strings (labels, text, values) in characters. 0 = server default (300). Identifier-like attributes (type, name, role) have their own fixed, shorter cap and are unaffected.
+- `MaxTotalTokens` (`int32`) — MaxTotalTokens budgets the whole page in estimated tokens rather than characters, because the same character count is worth roughly four times as many tokens in CJK text as in ASCII. 0 = server default (8000). Frames are visited in tree order and each gets whatever is left.
+- `IncludeBounds` (`bool`) — IncludeBounds adds bounds="x,y,w,h" to every row. Off by default; bounds cost about as much as the rest of a row and are rarely needed, since elements are addressed by backendNodeId.
+- `ViewportOnly` (`bool`) — ViewportOnly limits the walk to elements intersecting the frame's current viewport. Off by default.
+- `BackendNodeId` (`int32`) — Subtree scope — set exactly one of BackendNodeId, Selector or JSExpression to observe only that element's subtree (follow-up looks at a form then cost the form, not the ads around it). Omit all three for the whole page. Child iframes reached inside the scope are still visited.
+- `Selector` (`string`)
+- `JSExpression` (`string`)
+- `InFrame` (`string`) — InFrame looks up the scope root: empty = main frame, a frameId, or AllFrames. Ignored when observing the whole page.
+
+### `ReactionOpts`
+
+*struct*
+
+ReactionOpts customizes CloudBrowser.AddReactionWith. Zero/empty values mean "use the server default".
+
+**Fields:**
+- `On` (`*Locator`) *(optional)* — On overrides the click target. Nil = click the matched element itself. Provide a CSS or JS Locator to click a different element, resolved in the matched element's frame (e.g. a modal's close "X"). Node/At locators are rejected.
+- `Button` (`string`) — Button is the mouse button for the click. Valid: "left" (default), "right", "middle".
+- `ClickCount` (`int32`) — ClickCount controls single/double-click. 0 or 1 = single click (default), 2 = double-click.
+- `IntervalMs` (`float64`) — IntervalMs is the poll cadence in milliseconds for the shared page loop. 0 = server default (300ms).
+
+### `ReadCanvasOpts`
+
+*struct*
+
+ReadCanvasOpts customizes a CloudBrowser.ReadCanvasWith call. Zero/empty values mean "use the server default".
+
+**Fields:**
+- `InFrame` (`string`) — InFrame overrides the locator's own frame. Empty = use the locator's frame (or the main frame if none). Pass a specific frameId, or AllFrames, to search elsewhere.
+- `Format` (`string`) — Format is the output encoding. "" or "png" (default), "jpeg", "webp", or "rgba" for the raw unpremultiplied RGBA pixel buffer.
+- `Quality` (`int32`) — Quality is the encode quality 0-100 for "jpeg"/"webp" (ignored otherwise). 0 = server default (90).
+- `SX` (`int32`) — SX, SY, SW, SH is an optional sub-rectangle in canvas pixels (mirrors getImageData(sx, sy, sw, sh)). The full canvas is read when SW/SH <= 0.
+- `SY` (`int32`) — SX, SY, SW, SH is an optional sub-rectangle in canvas pixels (mirrors getImageData(sx, sy, sw, sh)). The full canvas is read when SW/SH <= 0.
+- `SW` (`int32`) — SX, SY, SW, SH is an optional sub-rectangle in canvas pixels (mirrors getImageData(sx, sy, sw, sh)). The full canvas is read when SW/SH <= 0.
+- `SH` (`int32`) — SX, SY, SW, SH is an optional sub-rectangle in canvas pixels (mirrors getImageData(sx, sy, sw, sh)). The full canvas is read when SW/SH <= 0.
+
+### `SelectOpts`
+
+*struct*
+
+SelectOpts customizes a SelectByXxxWith call. Zero/empty values mean "use the server default".
+
+**Fields:**
+- `InFrame` (`string`) — InFrame overrides the locator's own frame. Empty = use the locator's frame (or the main frame if none). Pass a specific frameId, or AllFrames, to search elsewhere.
+- `NoEvents` (`bool`) — NoEvents picks the option silently without firing input/change events. Default (false) fires the standard events.
+
+## Results
+
+What commands hand back.
+
+### `DragResult`
+
+*struct*
+
+DragResult is the outcome of a CloudBrowser.Drag gesture: the resolved source element and the start/end coordinates of the performed drag.
+
+**Fields:**
+- `Success` (`bool`)
+- `FrameId` (`string`)
+- `BackendNodeId` (`int32`)
+- `StartX` (`float64`)
+- `StartY` (`float64`)
+- `EndX` (`float64`)
+- `EndY` (`float64`)
+
+### `ElementResult`
+
+*struct*
+
+ElementResult is the outcome of an element interaction such as CloudBrowser.Click, CloudBrowser.Fill or CloudBrowser.ScrollTo: the resolved element plus the root-relative coordinates the action was performed at.
+
+**Fields:**
+- `Success` (`bool`)
+- `FrameId` (`string`)
+- `BackendNodeId` (`int32`)
+- `IsVisible` (`bool`)
+- `Bounds` (`Rect`)
+- `RootX` (`float64`)
+- `RootY` (`float64`)
+
+### `EvaluateResult`
+
+*struct*
+
+EvaluateResult carries the outcome of a JS evaluate call.
+
+If the expression returned a DOM element, BackendNodeId/IsVisible/Bounds are populated and Value is nil. Otherwise Value holds the parsed JSON value (string/number/bool/[]any/mapstringany/nil). On parse failure Value falls back to the raw server string so the caller is never empty- handed.
+
+**Fields:**
+- `Success` (`bool`) — Success is false only when the expression never produced a value, in which case the error carries the reason. An expression that answers falsy is a successful evaluation, so this does not mean "the answer was false".
+- `Value` (`any`)
+- `BackendNodeId` (`int32`)
+- `IsVisible` (`bool`)
+- `Bounds` (`Rect`)
+
+### `FrameInfo`
+
+*struct*
+
+FrameInfo describes a single frame within a page's frame tree.
+
+**Fields:**
+- `FrameId` (`string`)
+- `Url` (`string`)
+- `IsOOPIF` (`bool`)
+- `HasJSContext` (`bool`)
+- `IsLoading` (`bool`)
+- `IsVisible` (`bool`)
+- `AbsoluteRect` (`Rect`)
+- `RelativeRect` (`Rect`)
+- `Children` (`[]*FrameInfo`)
+
+### `InspectResult`
+
+*struct*
+
+InspectResult describes the topmost element hit at viewport-relative (x, y). BackendNodeId == 0 means nothing was found at that position.
+
+**Fields:**
+- `BackendNodeId` (`int32`)
+- `FrameId` (`string`)
+- `TagName` (`string`)
+- `TextContent` (`string`)
+- `IsVisible` (`bool`)
+- `Bounds` (`Rect`)
+
+### `InterceptedResponse`
+
+*struct*
+
+InterceptedResponse describes a network response captured by CloudBrowser.WaitForAnyResponse.
+
+**Fields:**
+- `Url` (`string`)
+- `StatusCode` (`int32`)
+- `Headers` (`[]Header`)
+- `Body` (`string`)
+
+### `NavigateResult`
+
+*struct*
+
+NavigateResult reports where a CloudBrowser.Navigate call ended up after redirects.
+
+**Fields:**
+- `FrameId` (`string`)
+- `Url` (`string`)
+
+### `OccluderInfo`
+
+*struct*
+
+OccluderInfo describes the element that intercepted a click — the element sitting on top of the target at the intended click point. Coordinates are in root-viewport CSS pixels. Populated on ClickError for occlusion failures so the caller can locate and clear the blocker (e.g. find its close button).
+
+**Fields:**
+- `BackendNodeId` (`int32`)
+- `FrameId` (`string`)
+- `TagName` (`string`)
+- `Id` (`string`)
+- `ClassName` (`string`)
+- `Text` (`string`)
+- `Bounds` (`Rect`)
+- `PointerEvents` (`string`) — PointerEvents is the blocker's computed pointer-events keyword (e.g. "auto", "none", "all"). Lets you tell an invisible pass-through layer from one that genuinely swallows the click.
+- `Visibility` (`string`) — Visibility is the blocker's computed visibility keyword ("visible", "hidden", "collapse").
+- `Opacity` (`float64`) — Opacity is the blocker's computed opacity (0..1). 0 means visually invisible but it may still intercept clicks depending on PointerEvents.
+- `ZIndex` (`string`) — ZIndex is the blocker's computed effective z-index as a string ("0" when auto / not stacked).
+- `HittableWhileInvisible` (`bool`) — HittableWhileInvisible is true when the blocker intercepts clicks even while invisible (computed pointer-events in {all, painted, fill, stroke}): a real click is swallowed even at visibility:hidden / opacity:0. When false and the element is invisible, a real click would fall through.
+- `Position` (`string`) — Position is the computed position keyword. "fixed"/"sticky" means the blocker is pinned (by itself or an ancestor) and stays put no matter where the pointer goes — clear it by scrolling the target out from under it; ordinary overlays often collapse once the pointer leaves.
+
+### `PageInfo`
+
+*struct*
+
+PageInfo describes an open page (tab or popup) inside a browser context.
+
+**Fields:**
+- `PageId` (`string`)
+- `BrowserContextId` (`string`)
+- `Url` (`string`)
+- `Title` (`string`)
+- `Viewport` (`Rect`)
+- `FrameTree` (`FrameInfo`)
+
+### `ReactionInfo`
+
+*struct*
+
+ReactionInfo describes a still-pending reaction, as returned by CloudBrowser.ListReactions. One-shot reactions that have already fired are gone and never appear here.
+
+**Fields:**
+- `ReactionID` (`string`) — ReactionID is the stable id assigned by AddReaction (pass to RemoveReaction).
+- `MatchSelector` (`string`) — MatchSelector is set if the reaction matches by CSS selector.
+- `MatchJsExpression` (`string`) — MatchJsExpression is set if the reaction matches by JS expression.
+- `ActionSelector` (`string`) — ActionSelector is set if the click target differs from the matched element.
+- `ActionJsExpression` (`string`) — ActionJsExpression is set if the click target differs from the matched element.
+- `FrameID` (`string`) — FrameID is the frame scope: "" for the main frame, a specific frameId, or AllFrames.
+- `Visible` (`bool`) — Visible reports whether the match additionally requires visibility.
+
+### `ReadCanvasResult`
+
+*struct*
+
+ReadCanvasResult is the pixel readback of a <canvas>, returned by CloudBrowser.ReadCanvas. DataBase64 holds the encoded image bytes (PNG by default) or the raw RGBA buffer when Opts.Format == "rgba". OriginClean reports whether the canvas was untainted (informational; the read succeeds either way).
+
+**Fields:**
+- `Success` (`bool`)
+- `FrameId` (`string`)
+- `BackendNodeId` (`int32`)
+- `DataBase64` (`string`)
+- `Width` (`int32`)
+- `Height` (`int32`)
+- `OriginClean` (`bool`)
+
+### `ScreenshotResult`
+
+*struct*
+
+ScreenshotResult is a single captured image of the page, returned by CloudBrowser.Screenshot. DataBase64 holds the encoded image bytes (PNG by default); Width and Height are in physical pixels.
+
+**Fields:**
+- `DataBase64` (`string`)
+- `Width` (`int32`)
+- `Height` (`int32`)
+
+### `ScriptFinished`
+
+*struct*
+
+ScriptFinished says how a run ended.
+
+**Fields:**
+- `Success` (`bool`) — Success is false when the script failed to compile or threw; Result then holds the message.
+- `Result` (`string`) — Result is the return value as JSON, or the error message.
+- `Stopped` (`bool`) — Stopped is true when the run was cancelled, or the session went away under it, rather than the script returning on its own.
+
+### `ScriptResult`
+
+*struct*
+
+ScriptResult is the outcome of a blocking CloudBrowser.RunScript.
+
+**Fields:**
+- `Success` (`bool`) — Success is false when the script failed to compile or threw; Result then holds the message.
+- `Result` (`string`) — Result is the return value as JSON, or "undefined" when the script returned nothing. On failure it is the error message.
+- `RunId` (`string`) — RunId names the run. It arrives with the reply, so it is only useful after the fact — to match up log lines a separate follower already saw.
+- `Log` (`[]ScriptLogEntry`) — Log is everything the script printed, in order.
+- `Truncated` (`bool`) — Truncated is true when the script printed more than the reply holds, in which case Log is the tail of the output rather than all of it.
+
+### `ScriptRunInfo`
+
+*struct*
+
+ScriptRunInfo is one run still in flight, as CloudBrowser.ListScriptRuns reports it.
+
+**Fields:**
+- `RunId` (`string`)
+- `Running` (`time.Duration`) — Running is how long the run has been going.
+
+### `SelectOptionResult`
+
+*struct*
+
+SelectOptionResult reports which <option> a SelectByXxx call ended up selecting.
+
+**Fields:**
+- `Success` (`bool`)
+- `SelectedIndex` (`int32`)
+- `SelectedValue` (`string`)
+- `SelectedText` (`string`)
+
+### `StreamAnswer`
+
+*struct*
+
+StreamAnswer is the browser's reply to a CloudBrowser.StartStream.
+
+**Fields:**
+- `AnswerSDP` (`string`) — SDP answer to apply as your peer's remote description.
+- `Viewport` (`Rect`) — Root viewport in CSS pixels, the coordinate space the stream's input data channels expect. X/Y are always 0. Map your on-screen pointer positions into this space before sending them; the video may be displayed at any size. It arrives with the answer rather than from a separate GetPages so it cannot race the stream, and the browser pushes {"type":"viewport","width":W,"height":H} on the reliable "input" channel whenever it changes.
+
+### `WaitResult`
+
+*struct*
+
+WaitResult is the outcome of a CloudBrowser.Wait / CloudBrowser.WaitForAny call: which condition matched (Index, in argument order) and where the matched element lives.
+
+**Fields:**
+- `Index` (`int32`)
+- `FrameId` (`string`)
+- `BackendNodeId` (`int32`)
+- `IsVisible` (`bool`)
+- `Bounds` (`Rect`)
+
+## Data types
+
+Everything else the API passes around: handles, events, records and enums.
+
+### `AuthSession`
+
+*struct*
+
+AuthSession is a portable snapshot of a context's signed-in Google account and/or DBSC sessions. All fields are optional so a context that only has DBSC (no primary account) or only a sign-in (no DBSC) round-trips.
+
+Pair with CloudBrowser.GetCookies / CloudBrowser.SetCookies and CloudBrowser.GetStorage / CloudBrowser.SetStorage to fully move a persona between fresh contexts. Call CloudBrowser.SetAuthSession before navigating.
+
+**Fields:**
+- `GaiaID` (`*string`) *(optional)*
+- `Email` (`*string`) *(optional)*
+- `RefreshToken` (`*string`) *(optional)*
+- `WrappedBindingKey` (`*string`) *(optional)*
+- `SigninScopedDeviceID` (`*string`) *(optional)*
+- `SyncConsent` (`*bool`) *(optional)*
+- `DbscSessions` (`[]DbscSession`)
 
 ### `CookiePartitionKey`
 
@@ -2613,16 +2953,6 @@ DomChildren is the reply to CloudBrowser.GetDomChildren.
 **Fields:**
 - `Children` (`string`) — Children is a JSON array of DOM.Node. Empty for an id the mirror never handed out, which is also what a stale id from before a resync looks like.
 - `Seq` (`uint64`) — Seq is the page sequence this payload is valid as of.
-
-### `DomMirrorOptions`
-
-*struct*
-
-DomMirrorOptions configures CloudBrowser.MirrorDom and CloudBrowser.StartDomMirror.
-
-**Fields:**
-- `Depth` (`int32`) — Depth is how many levels to serialize up front. 0 uses the server default of 2 — #document → <html> → <head>/<body>, enough to draw a collapsed tree. -1 walks everything and gives up what the mirror is for.
-- `Pierce` (`bool`) — Pierce descends into author shadow roots. Fixed for the life of the mirror.
 
 ### `DomNode`
 
@@ -2679,32 +3009,6 @@ DomSnapshot is the opening snapshot: the main frame's document. Child frames are
 - `FrameId` (`string`) — FrameId is the page's main frame.
 - `Seq` (`uint64`) — Seq is the page sequence this snapshot is the baseline for. Every update after it carries a higher one.
 
-### `DragError`
-
-*struct*
-
-DragError is returned as the error from CloudBrowser.Drag variants when the source element could not be acquired/pressed. Drag picks up the source with the same smart click as CloudBrowser.Click, so a pre-drag failure is a click failure: Code/Message mirror it and the full click diagnostics live under ClickError. Implements the error interface; recover with errors.As.
-
-**Fields:**
-- `Code` (`string`) — Code is mirrored from the underlying click failure: "not_found", "occluded_no_reachable_point" or "occluded_after_evade".
-- `Message` (`string`) — Message is a human-readable description (mirrors ClickError.Message).
-- `ClickError` (`*ClickError`) *(optional)* — ClickError is the underlying click-core failure at the source pickup.
-
-### `DragResult`
-
-*struct*
-
-DragResult is the outcome of a CloudBrowser.Drag gesture: the resolved source element and the start/end coordinates of the performed drag.
-
-**Fields:**
-- `Success` (`bool`)
-- `FrameId` (`string`)
-- `BackendNodeId` (`int32`)
-- `StartX` (`float64`)
-- `StartY` (`float64`)
-- `EndX` (`float64`)
-- `EndY` (`float64`)
-
 ### `ElementRef`
 
 *struct*
@@ -2720,81 +3024,6 @@ ElementRef is a lightweight descriptor of an element — enough to identify it (
 - `InputType` (`string`) — InputType is the <input> type, if the element is an <input>.
 - `Text` (`string`) — Text is a whitespace-collapsed textContent/value snippet (max 120 chars).
 - `Editable` (`bool`) — Editable is true when the element is itself an editable text sink (input / textarea / contenteditable).
-
-### `ElementResult`
-
-*struct*
-
-ElementResult is the outcome of an element interaction such as CloudBrowser.Click, CloudBrowser.Fill or CloudBrowser.ScrollTo: the resolved element plus the root-relative coordinates the action was performed at.
-
-**Fields:**
-- `Success` (`bool`)
-- `FrameId` (`string`)
-- `BackendNodeId` (`int32`)
-- `IsVisible` (`bool`)
-- `Bounds` (`Rect`)
-- `RootX` (`float64`)
-- `RootY` (`float64`)
-
-### `EvaluateResult`
-
-*struct*
-
-EvaluateResult carries the outcome of a JS evaluate call.
-
-If the expression returned a DOM element, BackendNodeId/IsVisible/Bounds are populated and Value is nil. Otherwise Value holds the parsed JSON value (string/number/bool/[]any/mapstringany/nil). On parse failure Value falls back to the raw server string so the caller is never empty- handed.
-
-**Fields:**
-- `Value` (`any`)
-- `BackendNodeId` (`int32`)
-- `IsVisible` (`bool`)
-- `Bounds` (`Rect`)
-
-### `FillError`
-
-*struct*
-
-FillError is returned as the error from CloudBrowser.Fill / CloudBrowser.FillWith when the field could not be focused/typed. Fill focuses the field with the exact same smart click as CloudBrowser.Click, so a pre-typing failure is a click failure: Code/Message mirror it and the full click diagnostics live under ClickError. It implements the error interface, so the ordinary `res, err := browser.Fill(...)` shape keeps working; recover the detail with errors.As:
-
-res, err := browser.Fill(ctx, browserscale.CSS("#email"), "a@b.com") var fe *browserscale.FillError if errors.As(err, &fe) && fe.ClickError != nil { // fe.ClickError.Occluder describes the blocker }
-
-**Fields:**
-- `Code` (`string`) — Code is the machine-stable failure code. Click-phase codes ("not_found", "occluded_no_reachable_point", "occluded_after_evade") mirror the underlying focus click, with diagnostics under ClickError. The focus codes are "focus_stolen" (another element took focus — FocusedElement names it; Fill is strictly target-bound and will not type into the thief) and "focus_lost" (focus left the target and nothing is focused). For untargeted stream typing that lets focus move (e.g. OTP), use Type.
-- `Message` (`string`) — Message is a human-readable description (mirrors ClickError.Message).
-- `ClickError` (`*ClickError`) *(optional)* — ClickError is the underlying click-core failure (locate or occlusion) that prevented focusing/typing. Present for the click-phase codes; absent for "focus_stolen"/"focus_lost".
-- `FocusedBackendNodeId` (`int32`) — FocusedBackendNodeId is the node that held focus when Fill gave up (0 if nothing was focused), for the "focus_stolen"/"focus_lost" codes.
-- `FocusedElement` (`*ElementRef`) *(optional)* — FocusedElement describes the element that grabbed focus instead of the target ("focus_stolen"), so you can act on it (e.g. a consent button).
-- `TargetEditable` (`*bool`) *(optional)* — TargetEditable and TargetValueLength report the fill target's own state at the point of failure (the focus codes): whether it is still an editable text sink and its current text length. Both nil when not reported.
-- `TargetValueLength` (`*int`) *(optional)*
-
-### `FillOpts`
-
-*struct*
-
-FillOpts customizes a CloudBrowser.FillWith call. Zero/empty values mean "use the server default".
-
-**Fields:**
-- `InFrame` (`string`) — InFrame overrides the locator's own frame. Empty = use the locator's frame (or the main frame if none). Pass a specific frameId, or AllFrames, to search elsewhere.
-- `ClearFirst` (`bool`) — ClearFirst, when true, wipes the field's existing content with Ctrl+A, Delete before typing. Default (false) appends to whatever is already there.
-- `TimeoutMs` (`*float64`) *(optional)* — TimeoutMs bounds focus acquisition (locate, scroll, settle, un-occlude) in ms, mirroring the click timeout. nil = server default (5000). It is a pointer because 0 is meaningful: browserscale.Ptr(0.0) makes Fill one-shot (no retry).
-- `SteadyMs` (`*float64`) *(optional)* — SteadyMs is the settle window in ms before the focus click, mirroring the click steady-time. nil = server default (750); browserscale.Ptr(0.0) skips settling.
-
-### `FrameInfo`
-
-*struct*
-
-FrameInfo describes a single frame within a page's frame tree.
-
-**Fields:**
-- `FrameId` (`string`)
-- `Url` (`string`)
-- `IsOOPIF` (`bool`)
-- `HasJSContext` (`bool`)
-- `IsLoading` (`bool`)
-- `IsVisible` (`bool`)
-- `AbsoluteRect` (`Rect`)
-- `RelativeRect` (`Rect`)
-- `Children` (`[]*FrameInfo`)
 
 ### `Header`
 
@@ -2838,20 +3067,6 @@ IceServer is one entry for a WebRTC RTCPeerConnection's ICE configuration: a TUR
 - `Username` (`string`) — Username is the short-lived TURN REST username (empty for plain STUN).
 - `Credential` (`string`) — Credential is the short-lived TURN REST credential (empty for plain STUN).
 
-### `InspectResult`
-
-*struct*
-
-InspectResult describes the topmost element hit at viewport-relative (x, y). BackendNodeId == 0 means nothing was found at that position.
-
-**Fields:**
-- `BackendNodeId` (`int32`)
-- `FrameId` (`string`)
-- `TagName` (`string`)
-- `TextContent` (`string`)
-- `IsVisible` (`bool`)
-- `Bounds` (`Rect`)
-
 ### `InterceptedRequest`
 
 *struct*
@@ -2865,28 +3080,6 @@ InterceptedRequest describes an outgoing request captured by CloudBrowser.WaitFo
 - `Body` (`string`)
 - `ResourceType` (`string`)
 
-### `InterceptedResponse`
-
-*struct*
-
-InterceptedResponse describes a network response captured by CloudBrowser.WaitForAnyResponse.
-
-**Fields:**
-- `Url` (`string`)
-- `StatusCode` (`int32`)
-- `Headers` (`[]Header`)
-- `Body` (`string`)
-
-### `NavigateResult`
-
-*struct*
-
-NavigateResult reports where a CloudBrowser.Navigate call ended up after redirects.
-
-**Fields:**
-- `FrameId` (`string`)
-- `Url` (`string`)
-
 ### `NetworkBodies`
 
 *type alias*
@@ -2894,25 +3087,6 @@ NavigateResult reports where a CloudBrowser.Navigate call ended up after redirec
 `type NetworkBodies = string`
 
 NetworkBodies selects how much of a response body network capture keeps.
-
-### `NetworkCapture`
-
-*struct*
-
-NetworkCapture is a running capture, returned by CloudBrowser.CaptureNetwork. Exchanges are delivered to the handler passed there; this handle only exists to stop the capture and to report how it went.
-
-### `NetworkCaptureOptions`
-
-*struct*
-
-NetworkCaptureOptions configures CloudBrowser.CaptureNetwork.
-
-There is deliberately no byte-cap option: buffer sizes bound memory on a machine shared with other sessions, so the server owns them.
-
-**Fields:**
-- `Patterns` (`[]string`) — Patterns are URL wildcards to capture; nil captures every request the session makes. Prefix a pattern with "!" to exclude it, which is the short way to say "everything except this".
-- `Bodies` (`NetworkBodies`) — Bodies selects response-body capture. Empty means NetworkBodiesNone.
-- `BodyPatterns` (`[]string`) — BodyPatterns narrows body capture to a subset of the captured requests; nil applies Bodies to all of them. Use it to log every request but only keep the payloads you care about.
 
 ### `NetworkExchange`
 
@@ -2979,116 +3153,6 @@ NetworkResourceType is the kind of load an exchange belongs to. It is a string r
 
 NetworkServedFrom says where an exchange's response came from.
 
-### `ObservationOpts`
-
-*struct*
-
-ObservationOpts customizes a CloudBrowser.GetObservationWith call. Zero/empty values mean "use the server default".
-
-**Fields:**
-- `Format` (`string`) — Format is "text" (default) for the compact line format meant to be handed to a model as-is, or "json" for the structured form. Only the requested representation is built, so asking for one does not cost the other.
-- `MaxElementsPerFrame` (`int32`) — MaxElementsPerFrame caps emitted elements per frame. 0 = server default (800). This is a safety net against runaway documents; MaxTotalTokens is the limit that normally binds.
-- `MaxTextLength` (`int32`) — MaxTextLength caps human-readable strings (labels, text, values) in characters. 0 = server default (300). Identifier-like attributes (type, name, role) have their own fixed, shorter cap and are unaffected.
-- `MaxTotalTokens` (`int32`) — MaxTotalTokens budgets the whole page in estimated tokens rather than characters, because the same character count is worth roughly four times as many tokens in CJK text as in ASCII. 0 = server default (8000). Frames are visited in tree order and each gets whatever is left.
-- `IncludeBounds` (`bool`) — IncludeBounds adds bounds="x,y,w,h" to every row. Off by default; bounds cost about as much as the rest of a row and are rarely needed, since elements are addressed by backendNodeId.
-- `ViewportOnly` (`bool`) — ViewportOnly limits the walk to elements intersecting the frame's current viewport. Off by default.
-- `BackendNodeId` (`int32`) — Subtree scope — set exactly one of BackendNodeId, Selector or JSExpression to observe only that element's subtree (follow-up looks at a form then cost the form, not the ads around it). Omit all three for the whole page. Child iframes reached inside the scope are still visited.
-- `Selector` (`string`)
-- `JSExpression` (`string`)
-- `InFrame` (`string`) — InFrame looks up the scope root: empty = main frame, a frameId, or AllFrames. Ignored when observing the whole page.
-
-### `OccluderInfo`
-
-*struct*
-
-OccluderInfo describes the element that intercepted a click — the element sitting on top of the target at the intended click point. Coordinates are in root-viewport CSS pixels. Populated on ClickError for occlusion failures so the caller can locate and clear the blocker (e.g. find its close button).
-
-**Fields:**
-- `BackendNodeId` (`int32`)
-- `FrameId` (`string`)
-- `TagName` (`string`)
-- `Id` (`string`)
-- `ClassName` (`string`)
-- `Text` (`string`)
-- `Bounds` (`Rect`)
-- `PointerEvents` (`string`) — PointerEvents is the blocker's computed pointer-events keyword (e.g. "auto", "none", "all"). Lets you tell an invisible pass-through layer from one that genuinely swallows the click.
-- `Visibility` (`string`) — Visibility is the blocker's computed visibility keyword ("visible", "hidden", "collapse").
-- `Opacity` (`float64`) — Opacity is the blocker's computed opacity (0..1). 0 means visually invisible but it may still intercept clicks depending on PointerEvents.
-- `ZIndex` (`string`) — ZIndex is the blocker's computed effective z-index as a string ("0" when auto / not stacked).
-- `HittableWhileInvisible` (`bool`) — HittableWhileInvisible is true when the blocker intercepts clicks even while invisible (computed pointer-events in {all, painted, fill, stroke}): a real click is swallowed even at visibility:hidden / opacity:0. When false and the element is invisible, a real click would fall through.
-- `Position` (`string`) — Position is the computed position keyword. "fixed"/"sticky" means the blocker is pinned (by itself or an ancestor) and stays put no matter where the pointer goes — clear it by scrolling the target out from under it; ordinary overlays often collapse once the pointer leaves.
-
-### `PageInfo`
-
-*struct*
-
-PageInfo describes an open page (tab or popup) inside a browser context.
-
-**Fields:**
-- `PageId` (`string`)
-- `BrowserContextId` (`string`)
-- `Url` (`string`)
-- `Title` (`string`)
-- `Viewport` (`Rect`)
-- `FrameTree` (`FrameInfo`)
-
-### `ReactionInfo`
-
-*struct*
-
-ReactionInfo describes a still-pending reaction, as returned by CloudBrowser.ListReactions. One-shot reactions that have already fired are gone and never appear here.
-
-**Fields:**
-- `ReactionID` (`string`) — ReactionID is the stable id assigned by AddReaction (pass to RemoveReaction).
-- `MatchSelector` (`string`) — MatchSelector is set if the reaction matches by CSS selector.
-- `MatchJsExpression` (`string`) — MatchJsExpression is set if the reaction matches by JS expression.
-- `ActionSelector` (`string`) — ActionSelector is set if the click target differs from the matched element.
-- `ActionJsExpression` (`string`) — ActionJsExpression is set if the click target differs from the matched element.
-- `FrameID` (`string`) — FrameID is the frame scope: "" for the main frame, a specific frameId, or AllFrames.
-- `Visible` (`bool`) — Visible reports whether the match additionally requires visibility.
-
-### `ReactionOpts`
-
-*struct*
-
-ReactionOpts customizes CloudBrowser.AddReactionWith. Zero/empty values mean "use the server default".
-
-**Fields:**
-- `On` (`*Locator`) *(optional)* — On overrides the click target. Nil = click the matched element itself. Provide a CSS or JS Locator to click a different element, resolved in the matched element's frame (e.g. a modal's close "X"). Node/At locators are rejected.
-- `Button` (`string`) — Button is the mouse button for the click. Valid: "left" (default), "right", "middle".
-- `ClickCount` (`int32`) — ClickCount controls single/double-click. 0 or 1 = single click (default), 2 = double-click.
-- `IntervalMs` (`float64`) — IntervalMs is the poll cadence in milliseconds for the shared page loop. 0 = server default (300ms).
-
-### `ReadCanvasOpts`
-
-*struct*
-
-ReadCanvasOpts customizes a CloudBrowser.ReadCanvasWith call. Zero/empty values mean "use the server default".
-
-**Fields:**
-- `InFrame` (`string`) — InFrame overrides the locator's own frame. Empty = use the locator's frame (or the main frame if none). Pass a specific frameId, or AllFrames, to search elsewhere.
-- `Format` (`string`) — Format is the output encoding. "" or "png" (default), "jpeg", "webp", or "rgba" for the raw unpremultiplied RGBA pixel buffer.
-- `Quality` (`int32`) — Quality is the encode quality 0-100 for "jpeg"/"webp" (ignored otherwise). 0 = server default (90).
-- `SX` (`int32`) — SX, SY, SW, SH is an optional sub-rectangle in canvas pixels (mirrors getImageData(sx, sy, sw, sh)). The full canvas is read when SW/SH <= 0.
-- `SY` (`int32`) — SX, SY, SW, SH is an optional sub-rectangle in canvas pixels (mirrors getImageData(sx, sy, sw, sh)). The full canvas is read when SW/SH <= 0.
-- `SW` (`int32`) — SX, SY, SW, SH is an optional sub-rectangle in canvas pixels (mirrors getImageData(sx, sy, sw, sh)). The full canvas is read when SW/SH <= 0.
-- `SH` (`int32`) — SX, SY, SW, SH is an optional sub-rectangle in canvas pixels (mirrors getImageData(sx, sy, sw, sh)). The full canvas is read when SW/SH <= 0.
-
-### `ReadCanvasResult`
-
-*struct*
-
-ReadCanvasResult is the pixel readback of a <canvas>, returned by CloudBrowser.ReadCanvas. DataBase64 holds the encoded image bytes (PNG by default) or the raw RGBA buffer when Opts.Format == "rgba". OriginClean reports whether the canvas was untainted (informational; the read succeeds either way).
-
-**Fields:**
-- `Success` (`bool`)
-- `FrameId` (`string`)
-- `BackendNodeId` (`int32`)
-- `DataBase64` (`string`)
-- `Width` (`int32`)
-- `Height` (`int32`)
-- `OriginClean` (`bool`)
-
 ### `Rect`
 
 *struct*
@@ -3110,17 +3174,6 @@ RequestPattern matches a URL pattern in WaitForAnyRequest/Response. Set Abort to
 **Fields:**
 - `URL` (`string`)
 - `Abort` (`bool`)
-
-### `ScreenshotResult`
-
-*struct*
-
-ScreenshotResult is a single captured image of the page, returned by CloudBrowser.Screenshot. DataBase64 holds the encoded image bytes (PNG by default); Width and Height are in physical pixels.
-
-**Fields:**
-- `DataBase64` (`string`)
-- `Width` (`int32`)
-- `Height` (`int32`)
 
 ### `ScriptEvent`
 
@@ -3145,17 +3198,6 @@ Calls are sequential and in the order the browser produced them, so a run's last
 
 Blocking here stalls delivery: the server buffers a bounded number of events per reader and then drops its oldest, which ScriptRun.Dropped reports. Hand slow work to another goroutine.
 
-### `ScriptFinished`
-
-*struct*
-
-ScriptFinished says how a run ended.
-
-**Fields:**
-- `Success` (`bool`) — Success is false when the script failed to compile or threw; Result then holds the message.
-- `Result` (`string`) — Result is the return value as JSON, or the error message.
-- `Stopped` (`bool`) — Stopped is true when the run was cancelled, or the session went away under it, rather than the script returning on its own.
-
 ### `ScriptLogEntry`
 
 *struct*
@@ -3166,71 +3208,6 @@ ScriptLogEntry is one console.* call from a script.
 - `Level` (`string`) — Level is "info", "warning" or "error", from console.log / .warn / .error.
 - `Message` (`string`) — Message holds the logged arguments, already stringified the way console does it.
 - `Timestamp` (`time.Time`) — Timestamp is when the script printed the line, stamped in the browser.
-
-### `ScriptResult`
-
-*struct*
-
-ScriptResult is the outcome of a blocking CloudBrowser.RunScript.
-
-**Fields:**
-- `Success` (`bool`) — Success is false when the script failed to compile or threw; Result then holds the message.
-- `Result` (`string`) — Result is the return value as JSON, or "undefined" when the script returned nothing. On failure it is the error message.
-- `RunId` (`string`) — RunId names the run. It arrives with the reply, so it is only useful after the fact — to match up log lines a separate follower already saw.
-- `Log` (`[]ScriptLogEntry`) — Log is everything the script printed, in order.
-- `Truncated` (`bool`) — Truncated is true when the script printed more than the reply holds, in which case Log is the tail of the output rather than all of it.
-
-### `ScriptRunInfo`
-
-*struct*
-
-ScriptRunInfo is one run still in flight, as CloudBrowser.ListScriptRuns reports it.
-
-**Fields:**
-- `RunId` (`string`)
-- `Running` (`time.Duration`) — Running is how long the run has been going.
-
-### `ScrollError`
-
-*struct*
-
-ScrollError is returned as the error from CloudBrowser.ScrollTo when the target could not be located/scrolled. Implements the error interface; recover with errors.As.
-
-**Fields:**
-- `Code` (`string`) — Code is currently always "not_found".
-- `Message` (`string`) — Message is a human-readable description.
-
-### `SelectOptionError`
-
-*struct*
-
-SelectOptionError is returned as the error from CloudBrowser SelectByXxx calls when the option could not be selected. selectOption is programmatic (no pointer gate), so it only reports semantic failures. Implements the error interface; recover with errors.As.
-
-**Fields:**
-- `Code` (`string`) — Code is "not_found" (the <select> was not located) or "option_not_found" (no option matched the requested index/value/text).
-- `Message` (`string`) — Message is a human-readable description.
-
-### `SelectOptionResult`
-
-*struct*
-
-SelectOptionResult reports which <option> a SelectByXxx call ended up selecting.
-
-**Fields:**
-- `Success` (`bool`)
-- `SelectedIndex` (`int32`)
-- `SelectedValue` (`string`)
-- `SelectedText` (`string`)
-
-### `SelectOpts`
-
-*struct*
-
-SelectOpts customizes a SelectByXxxWith call. Zero/empty values mean "use the server default".
-
-**Fields:**
-- `InFrame` (`string`) — InFrame overrides the locator's own frame. Empty = use the locator's frame (or the main frame if none). Pass a specific frameId, or AllFrames, to search elsewhere.
-- `NoEvents` (`bool`) — NoEvents picks the option silently without firing input/change events. Default (false) fires the standard events.
 
 ### `StorageItem`
 
@@ -3252,16 +3229,6 @@ StorageOriginEntry groups the localStorage entries of one origin (e.g. "https://
 - `Origin` (`string`)
 - `Items` (`[]StorageItem`)
 
-### `StreamAnswer`
-
-*struct*
-
-StreamAnswer is the browser's reply to a CloudBrowser.StartStream.
-
-**Fields:**
-- `AnswerSDP` (`string`) — SDP answer to apply as your peer's remote description.
-- `Viewport` (`Rect`) — Root viewport in CSS pixels, the coordinate space the stream's input data channels expect. X/Y are always 0. Map your on-screen pointer positions into this space before sending them; the video may be displayed at any size. It arrives with the answer rather than from a separate GetPages so it cannot race the stream, and the browser pushes {"type":"viewport","width":W,"height":H} on the reliable "input" channel whenever it changes.
-
 ### `WaitArg`
 
 *interface*
@@ -3282,29 +3249,3 @@ WaitConditionStatus is the per-condition diagnostic carried by WaitError when a 
 - `IsVisible` (`bool`) — IsVisible reports whether it was CSS-visible at the last observation.
 - `Bounds` (`*Rect`) *(optional)* — Bounds is the last known rect in root-viewport coordinates (nil if never found).
 - `Occluder` (`*OccluderInfo`) *(optional)* — Occluder is the intercepting element, present iff State == "found_occluded".
-
-### `WaitError`
-
-*struct*
-
-WaitError is returned as the error from CloudBrowser.Wait when no condition matched before the deadline. It implements the error interface, so the ordinary `res, err := browser.Wait(...)` shape keeps working; recover the structured detail (including the per-condition breakdown) with errors.As:
-
-res, err := browser.Wait(ctx, browserscale.CSS(".ready")) var we *browserscale.WaitError if errors.As(err, &we) { for _, c := range we.Conditions { log.Printf("condition %d: %s", c.Index, c.State) } }
-
-**Fields:**
-- `Code` (`string`) — Code is a machine-stable failure code, currently always "timeout".
-- `Message` (`string`) — Message is a human-readable description.
-- `Conditions` (`[]WaitConditionStatus`) — Conditions holds the per-condition status, same order/length as the conditions passed to Wait.
-
-### `WaitResult`
-
-*struct*
-
-WaitResult is the outcome of a CloudBrowser.Wait / CloudBrowser.WaitForAny call: which condition matched (Index, in argument order) and where the matched element lives.
-
-**Fields:**
-- `Index` (`int32`)
-- `FrameId` (`string`)
-- `BackendNodeId` (`int32`)
-- `IsVisible` (`bool`)
-- `Bounds` (`Rect`)

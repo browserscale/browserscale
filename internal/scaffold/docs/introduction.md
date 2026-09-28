@@ -1,28 +1,200 @@
 <!--
   url: https://browserscale.cloud/docs
   title: Docs
-  description: browserscale documentation: rent a real cloud Chromium session and drive it from Go or TypeScript. Quickstart, core concepts, guides, and the full SDK reference.
+  description: browserscale documentation: real cloud Chromium with waits, clicks, frames and network handled inside the engine. Drive it from Go, TypeScript, the CLI or MCP. Quickstart, guides and the full SDK reference.
 -->
 
 # Introduction
 
-browserscale is a browser-as-a-service platform for running
-large-scale automation on real browser (Chromium) sessions. You write
-your script in **Go** (`browserscale-go`) or **TypeScript** (`browserscale-ts`), and browserscale
-runs the browser work in our infrastructure — behind proxies, with
-separate browser contexts and undetected fingerprints for each parallel
-task. Scale from one job to hundreds or thousands without shipping a
-headless binary or babysitting your own browser farm.
+browserscale is browser automation that doesn't guess. You rent a real
+Chromium browser in the cloud and drive it from **Go**, **TypeScript**, the
+**CLI** or any **MCP** client, and the hard parts of automation are no
+longer approximated from outside the browser. They happen inside the
+engine: a wait is reported by the page the instant it is true, a click
+checks the exact pixel it is about to press, and a cross-origin iframe is
+just another frame in one tree.
+
+Each session is an isolated browser context with its own cookies,
+storage, proxy and fingerprint, ready in under 250 ms, running on real
+consumer GPUs. Run one, or thousands side by side, without shipping a
+browser binary or operating a browser farm.
 
 > **TL;DR**
 >
-> - browserscale rents you a **real browser**, somewhere in the cloud, that you drive remotely.
-> - You write Go or TypeScript — there is no `chromium` binary on your machine.
-> - Proxies, fingerprints, captcha solving and network mocking are first-class.
+> - A **real browser** in the cloud, driven over one session API from Go, TypeScript, the CLI or MCP.
+> - Waits, clicks, frames and network interception are handled **inside the browser engine**, so they are exact instead of polled and invisible to the page.
+> - Every failure comes back as a **stable error code with typed detail**: what timed out, what blocked the click, how far each condition got.
+> - Stealth, proxies, identities, captchas, live streaming and scale are part of the platform, not add-ons you bolt on.
+
+## What you get
+
+### Acting on the page
+
+- **Clicks that check before they press.** The element is scrolled into
+  view through nested scrollers and up the frame chain, held until it stops
+  moving, approached on a human pointer path, and the pixel under the
+  pointer is verified to belong to it before the button goes down. If
+  something covers it, the click re-aims or steps out of a hover overlay's
+  way. If it is still blocked, the click refuses and names the element in
+  the way instead of landing on the wrong thing.
+- **Input the way hardware sends it.** Pointer and key events take the
+  path a real mouse and keyboard take. Typing follows the session region's
+  keyboard layout, with per-character timing that varies like a hand.
+- **Failures you can act on.** Every command answers with success or a
+  stable error code (`not_found`, `occluded_after_evade`, `timeout`, …)
+  plus typed detail, so your code, or a model, can repair the failure
+  instead of retrying blindly.
+
+→ [Interaction](/docs/guides/interaction) · [Targeting elements](/docs/guides/locators)
+
+### Waiting and reacting
+
+- **Waits the page reports.** Each document tells the wait the moment a
+  condition holds, usually within a frame. An idle wait costs nothing, and
+  more conditions or more frames cost a registration, not another polling
+  loop. By default a match means *visible and holding still*, not merely
+  present in the DOM.
+- **Races as a first-class shape.** Pass several outcomes (success, error
+  toast, captcha, login wall) and get back which one happened first,
+  together with the frame and a node handle the next action can use
+  directly.
+- **Timeouts that explain themselves.** A `WaitError` says, per condition,
+  how far it got: not found, found but hidden, found but covered (with the
+  covering element), or not yet steady.
+- **Reactions.** Arm a one-shot handler for the cookie banner or popup that
+  may or may not appear. The browser fires it on its own, across every frame
+  and navigation, between your calls, and then retires it.
+
+→ [Waiting](/docs/guides/waiting) · [Loading pages](/docs/guides/loading) · [Go `AddReaction`](/docs/api-reference/go#AddReaction)
+
+### Frames without bookkeeping
+
+- **One flat frame tree.** The main document, same-origin iframes and
+  cross-origin, out-of-process iframes are all just a `frameId`: no
+  per-frame sessions, no isolated worlds, no depth limit. A frame created
+  while a wait is running is covered the moment it exists.
+
+→ [Frames & iframes](/docs/guides/frames) · [Shadow DOM & canvas](/docs/guides/shadow-canvas)
+
+### Stealth on real hardware
+
+- **Control lives below the page.** Commands are carried out by the browser
+  itself. Nothing is injected into the page, there is no DevTools
+  handshake, and page JavaScript has nothing to observe.
+- **Real consumer GPUs.** Canvas, WebGL, audio and codec readbacks are
+  genuinely rendered. There is no spoofing layer and no hash database for a
+  deeper check to unmask.
+- **A shipped Chrome, not a build of one.** Sessions carry the state and
+  wire behavior of a consumer browser, consistent with the region they exit
+  from and reproducible from run to run.
+- **Captchas without third-party solvers.** Interactive challenges are
+  completed in the live session by browserscale's own solver. The
+  provider's own JavaScript issues the token; nothing is synthesized or
+  bought from an external API.
+
+→ [Captchas](/docs/guides/captchas)
+
+### Network
+
+- **Interception armed before anything loads.** It sits in the browser's
+  network stack, so every frame, cross-process iframe, worker and service
+  worker passes through it. There is no attach race, and nothing slips by.
+- **Capture that never pauses the page.** Stream every finished request
+  with the headers and cookies that actually went on the wire, each
+  redirect hop as its own exchange, with bodies copied off to the side.
+- **Catch one call and change it.** Wait for a request or response; block,
+  mock or rewrite it; or answer a whole navigation yourself.
+- **Pay for static assets once.** Heavy JS, CSS and images can be served
+  from a server-side cache outside the proxy, so repeat runs pay neither
+  the download nor the proxy bandwidth.
+
+→ [Network](/docs/guides/network) · [Capturing traffic](/docs/guides/capture)
+
+### Identity and state
+
+- **A login as one portable object.** Export a signed-in persona,
+  device-bound sessions included, and bring it up signed in inside a fresh
+  context.
+- **Cookies and storage as data.** Read and write the whole cookie jar,
+  partitioned cookies included, and local storage per origin, with no page
+  open.
+- **A machine you can come back as.** A country sets language, locale,
+  timezone and keyboard together; cores, memory and renderer stay
+  consistent in every frame and worker. Pin the fingerprint and the next run
+  is the same computer returning. Bring your own proxy, or let browserscale
+  allocate one.
+
+→ [Cookies, storage & sessions](/docs/guides/cookies)
+
+### Seeing the page
+
+- **Observation sized for a prompt.** One line per element across every
+  frame and closed shadow root, with role, live value, label and flags,
+  under a token budget. That is prompt-sized instead of a megabyte of HTML,
+  and it takes one round trip.
+- **A live DOM mirror.** Keep an incrementally updated copy of the page.
+  Only what changed in the part you expanded is sent, and an `<iframe>` is
+  an ordinary element holding its document.
+- Plus screenshots, canvas pixel reads, element inspection at a point, and
+  JavaScript evaluation in any frame.
+
+→ [Reading the page](/docs/guides/reading) · [Live DOM mirror](/docs/guides/dom-mirror) · [Evaluation](/docs/guides/evaluation)
+
+### Sessions at scale
+
+- **Contexts, not machines.** Each session has its own cookies, storage,
+  cache, proxy and persona, is ready in under 250 ms, and runs beside
+  thousands of others without sharing state.
+- **Sessions you can find again.** The browser lives server-side, so a
+  session outlives the process that rented it. List what a key holds and
+  reattach from any machine.
+- **Operated for you.** Heavy sessions cannot starve their neighbors,
+  capacity is warm before you rent, and a full host fails fast instead of
+  hanging.
+- **Watch it live, take over.** A low-latency WebRTC stream of the real
+  page, with mouse, keyboard and clipboard takeover from the dashboard or
+  the CLI.
+
+### Scripts beside the browser (BrowserVM, early access)
+
+- **Run your own JavaScript next to the page, not in it.** The script runs
+  in an isolate of its own and reaches the document through the engine. A
+  cross-origin `<iframe>` is plain `contentDocument`, values are live
+  objects, an element goes straight into `browser.click`, and the page sees
+  nothing injected. Steps cost microseconds instead of network round trips,
+  so a loop over a hundred rows is cheap.
+- Access is opened per account while in early access. Ask
+  [support](mailto:support@browserscale.cloud) or on
+  [Discord](https://discord.gg/SfE9C9K28D).
+
+→ [BrowserVM](/browservm)
+
+### Built for agents
+
+- **A hosted MCP server** exposes the same verbs as the SDKs to Cursor,
+  Claude, Codex or any MCP client, so an agent can look at a real page while
+  it writes the automation. Your key stays in a header, never in the
+  model's context.
+- **`browserscale init`** scaffolds a runnable project with a worker loop,
+  a proxy pool, an `AGENTS.md` and this documentation offline.
+
+→ [Agentic coding](/docs/guides/agentic-coding)
+
+## Ways to drive it
+
+Everything above runs against the same session API, so pick whichever
+entry point fits the job. You can also mix them: rent from the CLI, drive
+from Go, and watch in the dashboard.
+
+| Entry point | What it is |
+| --- | --- |
+| [**browserscale-go**](https://github.com/browserscale/browserscale-go) | The Go SDK. Context-first methods, explicit errors. |
+| [**browserscale-ts**](https://github.com/browserscale/browserscale-ts) | The TypeScript SDK, for Node.js and the browser. |
+| [**browserscale**](https://github.com/browserscale/browserscale) (CLI) | `init`, `rent`, `list`, `view`, `run` and `stop` from your terminal. |
+| [**MCP server**](/docs/guides/agentic-coding) | The browser as tools for any MCP client, one-to-one with the SDK. |
+| [**BrowserVM**](/browservm) | Your script, running inside the browser beside the page. |
 
 ## Install
-
-Pull the SDK for your language from its public registry:
 
 **Go:**
 
@@ -36,197 +208,52 @@ go get github.com/browserscale/browserscale-go
 npm install browserscale-ts
 ```
 
-Go needs **1.21+**, Node needs **18+**. Both SDKs are open source and
-talk to the same browserscale session API — see [Quickstart](/docs/quickstart)
-for a full runnable example.
+Go needs **1.22+** and Node needs **18+**. Both SDKs are open source. The Go
+package is documented on
+[pkg.go.dev](https://pkg.go.dev/github.com/browserscale/browserscale-go),
+and the TypeScript package is
+[`browserscale-ts` on npm](https://www.npmjs.com/package/browserscale-ts).
+[Quickstart](/docs/quickstart) takes you from here to a running script.
 
-**Packages and source**
+## What people build with it
 
-- **Go (`browserscale-go`)** — source on [GitHub](https://github.com/browserscale/browserscale-go), docs on [pkg.go.dev](https://pkg.go.dev/github.com/browserscale/browserscale-go). Install with `go get github.com/browserscale/browserscale-go`.
-- **TypeScript (`browserscale-ts`)** — the [`browserscale-ts` package on npm](https://www.npmjs.com/package/browserscale-ts), source on [GitHub](https://github.com/browserscale/browserscale-ts). Install with `npm install browserscale-ts`.
-
-## Use cases
-
-browserscale is built for workloads where every task needs a real browser identity,
-not just a DOM parser or a local headless process. Common use cases
-include:
-
-- Running large scrape, crawl or enrichment queues with one isolated
-  browser (Chromium) session per job.
-- Automating account, checkout, booking or form flows that depend on a
-  stable fingerprint, cookies and realistic browser behavior.
-- Testing production journeys through real proxies, captchas and network
-  conditions instead of mocked local pages.
-- Parallelizing browser work across many independent sessions without
-  managing Chromium installs, workers or browser lifecycle yourself.
-
-## Features
-
-- **Real browser (Chromium) sessions as a service** — run automation
-  against a full browser engine in the cloud, with pages, frames,
-  cookies, storage and network state.
-  - Real Chromium runtime, not a DOM-only scraper.
-  - Persistent session state while the rental is alive.
-- **Parallel isolated contexts** — each task gets its own session,
-  fingerprint and lifecycle, so large queues do not share browser state.
-  - Separate cookies, storage, pages and network state per session.
-  - Independent lifecycle per job, from rental to cleanup.
-  - Browser contexts, not VMs or processes — sub-250 ms spin-up, scaling to thousands in parallel.
-- **Fingerprint and proxy handling** — route traffic through
-  proxies and use browser identities designed for real production sites.
-  - Server-side fingerprint ids that can be pinned and reused.
-  - Browser properties, canvas, audio and WebGL responses tied to the
-    selected fingerprint.
-  - Matching speech synthesis voices, media codecs, DRM support and many
-    more browser surfaces, so the session looks like a real user browser
-    instead of a generic Chromium build.
-  - Locale and timezone defaults aligned with the rented identity unless
-    you override them.
-  - Native Chrome control without CDP, Playwright or Puppeteer leaks such
-    as `Runtime.enable` side-effects or DevTools handshake fingerprints.
-  - Bring your own proxy or let browserscale allocate one server-side.
-- **Native engine-level control** — automation runs *below* the page,
-  inside the browser engine, instead of driving it from outside over the
-  DevTools protocol like Playwright or Puppeteer. This is where both the
-  undetectability and the speed come from.
-  - Commands run natively inside Chromium itself, straight in the renderer
-    process — nothing is injected into the page, no `Runtime.enable`, no
-    DevTools handshake — so page JavaScript cannot observe the automation
-    and no trace is left behind.
-  - Waits are armed once inside the engine and run fully async; there is
-    no round-trip "is it there yet?" polling loop over a WebSocket, so a
-    wait fires the instant its condition is met.
-  - Steady-time checks are built in — an element is only reported back
-    once it exists and holds its position in the DOM, so animations and
-    layout shifts are absorbed before your click instead of being
-    discovered after it missed. It's all configurable from the SDK, so you
-    can relax the checks to match hidden or off-screen elements too.
-- **One flat frame tree** — the main document, same-origin iframes and
-  cross-origin OOPIFs are all just a `frameId` in a single tree, with none
-  of the flattened-session, `Runtime.enable` and per-frame
-  execution-context juggling other stacks force on you.
-  - `Wait` and `Click` act across every frame at once, or scope to a
-    single iframe — the SDK resolves the nesting for you whether the
-    target sits in a nested OOPIF or the top document.
-  - Searching across all frames, `Wait` hands back the `frameId` that
-    matched, ready to pass straight into the next action with no second
-    lookup or manual frame switching.
-- **Flow-optimized SDKs** — use JavaScript locators when CSS is not
-  enough, and explicit wait logic when real pages can branch.
-  - `Wait` can race multiple outcomes and return which one matched.
-  - JS locators can target elements by page logic, then hand the result
-    to normal actions instead of synthetic DOM clicks.
-- **Agent-friendly observation** — hand a model a compact view of the page
-  instead of a megabyte of raw HTML.
-  - `GetObservation` returns the visible elements as one line each, under
-    headers that already carry the URL, title and scroll position.
-  - Live form state comes with it: the value actually typed into a field,
-    checkbox state, `<select>` options, and flags for duplicate ids.
-  - Elements from nested iframes and cross-origin OOPIFs are included in
-    the same observation, each tagged with its frame — as are open and
-    closed shadow roots.
-  - The budget is measured in tokens across the whole page, and running
-    out degrades to interactive elements only instead of truncating in
-    document order and losing the submit button.
-- **Live DOM mirror** — follow the page's structure instead of re-fetching
-  it. `MirrorDom` holds the whole page as one incrementally updated tree.
-  - Changes are reported only inside the part you expanded, so a subtree
-    nobody opened costs a child count per batch instead of a re-serialized
-    document — which is what makes a DevTools-style view practical against
-    a page that rewrites a list sixty times a second.
-  - An `<iframe>` is an ordinary element whose one child is the document it
-    hosts, cross-origin ones included, so there is no per-frame recursion
-    and frames nobody opened cost nothing.
-  - `GetDomRevision` is an O(1) mutation counter for callers that would
-    rather poll than consume events, replacing a `GetDOMHash` loop that
-    re-serializes the tree to notice one attribute changed.
-- **Human-like interaction** — mouse movement and input are generated to
-  look like real browser usage instead of instant synthetic jumps.
-  - Mouse paths use browserscale's own movement algorithm for more natural cursor
-    timing and trajectories.
-- **WebRTC live video stream** — watch and control the rented browser
-  directly from the browserscale web interface.
-  - Low-latency browser video is streamed to the page for debugging,
-    demos and manual takeover.
-  - Mouse and keyboard input are sent back over WebRTC data channels.
-- **Captcha support, no third-party solvers** — common captcha flows can be
-  detected and solved from the same automation run.
-  - Passive anti-bot checks are handled without extra client code.
-  - Interactive challenges can be solved with `SolveCaptcha` /
-    `solveCaptcha`.
-  - Solving is done by browserscale's own AI solver, which learns the known challenge
-    types — puzzle, OCR, slide, hold and more — on its own and keeps
-    improving as they evolve.
-  - No token is ever synthesized or fetched from an external API: the
-    challenge is completed in the valid live browser and the provider's own
-    JavaScript issues the token itself — which is why even new or unknown
-    protections pass.
-- **Real hardware, real GPUs** — sessions run hardware-accelerated on real
-  consumer GPUs, not on VM cores with a WebGL faking layer.
-  - Canvas and WebGL readbacks (`toDataURL`, `getImageData`) return genuinely
-    rendered pixels — there is no spoofing layer and no fingerprint hash
-    database to maintain or unmask.
-  - New and deeper passive bot protections pass by default, because rendering
-    is executed for real instead of being simulated.
-- **Network control at the source** — interception sits in the browser's
-  network stack itself, so every request from every frame (including
-  cross-origin OOPIFs) passes through it. No handler races, nothing slips
-  through.
-  - Wait for requests and responses as part of the browser flow.
-  - Modify headers, mock responses or block matching requests.
-  - Mark repeated JS, CSS and image paths as static once with
-    `SetStaticPaths` and browserscale serves them from a server-side cache, cutting
-    proxy bandwidth and load time on repeat runs.
-  - `CaptureNetwork` streams every request the session completes to a
-    handler, from the browser process rather than a page — cross-process
-    iframes, workers and each hop of a redirect chain included, with the
-    headers that actually went on the wire. Nothing is paused, so the page
-    still loads at full speed.
-- **Go and TypeScript SDKs** — drive the same browser API from Go
-  (`browserscale-go`) or TypeScript (`browserscale-ts`).
-  - Use the same session concepts and browser commands in both SDKs.
-  - Connect over the browserscale session API instead of running Chromium locally.
-- **Built for AI coding agents** — hand the work to the agent in your editor
-  instead of writing the boilerplate yourself. See
-  [Agentic coding](/docs/guides/agentic-coding).
-  - A hosted MCP server exposes the browser as tools that map one-to-one
-    onto SDK methods, so an agent can look at a real page while it writes.
-  - `browserscale init` scaffolds a runnable Go module with a worker
-    loop, a proxy pool, an `AGENTS.md` and this documentation offline.
+- **Scraping and enrichment at volume:** one isolated session per job,
+  static assets cached server-side, and every response captured without
+  slowing the page.
+- **Account, checkout and booking flows:** portable logins, a fingerprint
+  that returns as the same machine, and waits that race every way the page
+  can branch.
+- **AI agents that use the web:** prompt-sized observations, error codes a
+  model can reason about, and an MCP server it can call directly.
+- **End-to-end checks against production:** real proxies, real captchas
+  and real network conditions, with a live stream to watch what happened.
 
 ## Glossary
 
-Four nouns show up on basically every page from here on. Skim them now,
-come back if a later page uses one in a way that surprises you.
+Four nouns come up on almost every page from here on.
 
-- **Session** — one rented browser. It lives until you call `Stop` or
-  until the `rentDuration` you booked expires. Each session is tied to
-  one `sessionId` and one gRPC URL.
-- **Page** — a single tab or popup inside a session. A session can hold
-  several pages — for example when a click opens `target="_blank"`.
-- **Frame** — every page is a tree of frames. The main document is the
-  root frame, each `<iframe>` is a child, and cross-origin frames
-  (OOPIFs) are first-class members of the tree.
-- **Locator** — your declarative *"which element, under what
-  conditions"*. The same Locator object works as a wait condition and as
-  a click / fill / drag target.
+- **Session:** one rented browser. It lives until you call `Stop` or the
+  `rentDuration` you booked expires, and it is addressed by one `sessionId`.
+- **Page:** a tab or popup inside a session. A session can hold several,
+  for example when a click opens `target="_blank"`.
+- **Frame:** every page is a tree of frames. The main document is the root,
+  each `<iframe>` is a child, and cross-origin frames are full members of
+  the same tree.
+- **Locator:** your declarative *"which element, under what conditions"*.
+  The same locator works as a wait condition and as a click, fill or drag
+  target.
 
 ## How these docs are structured
 
-These pages are written to be read top-to-bottom. **Quickstart** gets a
-working script onto your machine in under a minute. **Core concepts**
-then names the three SDK nouns you just used, so the rest of the API
-reference starts to feel like vocabulary rather than mystery. The
-**Guides** chapters that follow each pick one domain (waiting,
-networking, captchas, …) and go deep.
-
-If you would rather skip prose and start clicking, jump straight to
-Quickstart — you can always come back here once the script runs.
+**Quickstart** gets a working script running in a few minutes. **Core
+concepts** names the nouns you just used. The guides after that each take
+one job (driving a page, reading it, network and identity, agents) and go
+deep. The **API reference** lists every method and type for both SDKs.
 
 ## See also
 
-- [Quickstart](/docs/quickstart) — copy-paste a runnable example.
-- [Go SDK reference](/docs/api-reference/go) and [TypeScript SDK reference](/docs/api-reference/ts) — every method browserscale exposes.
-- [Agentic coding](/docs/guides/agentic-coding) — connect the MCP server and let a coding agent build the automation.
+- [Quickstart](/docs/quickstart): a runnable example to copy and paste.
+- [Go SDK reference](/docs/api-reference/go) and [TypeScript SDK reference](/docs/api-reference/ts): every method browserscale exposes.
+- [Agentic coding](/docs/guides/agentic-coding): connect the MCP server and let a coding agent build the automation.
 
 → Continue: [Quickstart](/docs/quickstart)

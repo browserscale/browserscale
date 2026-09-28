@@ -466,6 +466,60 @@ so a button gated on real input stays disabled and you'll waste time re-typing.
 reuse one base locator across frames. `MoveTo`/`ScrollTo`/`Drag*` take the frame
 from the locator itself.
 
+## Reactions — dismiss interstitials without polling
+
+A reaction is a one-shot background click: register it once and it fires the
+moment its locator matches, then removes itself. It waits for the pointer to be
+idle, so it slots into the gaps of your foreground actions — a newsletter modal
+that blocks a `Click` gets dismissed, and the click's own retry then lands.
+
+```go
+browser.AddReaction(ctx, browserscale.CSS("#accept-cookies").InAllFrames())   // click the match itself
+browser.AddReactionWith(ctx, browserscale.CSS("#newsletter-modal"),
+    browserscale.ReactionOpts{On: browserscale.CSS(".modal-close")})          // match one thing, click another
+id, _ := browser.AddReaction(ctx, browserscale.CSS(".promo"))
+browser.RemoveReaction(ctx, id)                                               // false if it already fired
+```
+
+Arm them right after `Navigate`, before the first action they could get in the
+way of. Reactions are scoped to the page and end with it.
+
+## Errors — branch on the code, not the text
+
+Every call returns `(result, error)`. When the browser carried the command out
+but the page would not go along with it, the error is a typed value with a
+machine-stable, lowercase `Code`; recover it with `errors.As`. Anything else —
+a dead session, a closed page, a malformed call — is a plain transport error.
+That split is the retry decision: a typed error means fix the flow (or branch),
+a plain one means the session is gone.
+
+```go
+_, err := browser.Click(ctx, browserscale.CSS("#buy"))
+var ce *browserscale.ClickError
+if errors.As(err, &ce) {
+    // ce.Code: not_found | occluded_no_reachable_point | occluded_after_evade
+    // ce.Occluder names the element on top (tag, id, class, text, bounds)
+}
+
+_, err = browser.Wait(ctx, browserscale.CSS(".ready"), browserscale.Timeout(15000))
+var we *browserscale.WaitError
+if errors.As(err, &we) {
+    for _, c := range we.Conditions { log.Printf("condition %d: %s", c.Index, c.State) }
+}
+
+_, err = browser.Evaluate(ctx, "document.title.toUpperCase()")
+var cmd *browserscale.CommandError                       // the generic one: Command + Code + Message
+if errors.As(err, &cmd) && cmd.Code == "threw" { /* the expression itself is broken */ }
+```
+
+- Types: `ClickError`, `FillError` (wraps a `ClickError` when the focusing
+  click failed), `DragError`, `MoveError`, `ScrollError`, `SelectOptionError`,
+  `WaitError`, and `CommandError` for everything else.
+- A code is scoped to its command — branch on `Code` together with the call.
+  Never parse `Message`; it is free to change.
+- The codes each method can return are listed under **throws** in
+  `docs/api-reference/go.md`.
+
 ## Evaluate — arbitrary JS
 
 ```go
@@ -481,7 +535,7 @@ Two result shapes on the single `EvaluateResult`:
 Rules:
 - **Single expression only.** Multi-statement bodies need an IIFE:
   `(() => { ...; return x; })()`.
-- A thrown JS error surfaces as a Go error on the call.
+- A thrown JS error surfaces as a `*CommandError` with `Code == "threw"`.
 - Don't use `Evaluate` to click (`el.click()`) — it fires synthetic events with
   no mouse path and anti-bot stacks flag it. Use `Click`.
 
@@ -491,6 +545,11 @@ Rules:
 object exposing the same operations as this SDK. Each call inside the script is a
 local function call, not a gRPC round trip, so a step costs microseconds instead
 of tens of milliseconds.
+
+Scripts run on **BrowserVM, which is in early access**. On an account without
+it, the call fails with a `FEATURE_NOT_ENABLED` transport error — don't design a
+flow around `RunScript` until you know it is enabled; plain SDK calls do the same
+work, just with more round trips.
 
 ```go
 result, err := browser.RunScript(ctx, `
@@ -679,7 +738,13 @@ browser.SetStorage(ctx, storage)
 ```
 
 Session metadata getters: `browser.CountryCode()`, `browser.Timezone()`,
-`browser.AcceptLanguage()`, `browser.Fingerprint()`, `browser.SessionId()`.
+`browser.AcceptLanguage()`, `browser.Fingerprint()`, `browser.SessionId()`,
+`browser.GrpcUrl()`.
+
+Log `SessionId()` and `GrpcUrl()` when a flow fails and leave the browser
+running: the MCP tools, `browserscale view <id>` and
+`browserscale.ConnectSession(ctx, grpcUrl, apiKey, sessionId)` can all attach
+to it and show the state it died in.
 
 ## Proven patterns
 

@@ -29,7 +29,9 @@ as live objects you can assign to rather than snapshots, an element can be
 handed straight to `+"`browser.click`"+`, and the page sees nothing injected. Steps
 cost microseconds instead of network round trips, so loops are affordable.
 
-A guide for it is still to come.
+This is BrowserVM, which is in early access: an account without it gets a
+"not enabled" answer rather than a run. What it is, and how to get access:
+https://browserscale.cloud/browservm
 
 The log streams to stdout as the script produces it, rather than arriving in one
 block when it ends — a script that takes a minute is something you can watch. The
@@ -235,6 +237,17 @@ func printScriptLine(prefix string, entry browserscale.ScriptLogEntry) {
 	default:
 		fmt.Printf("%s%s: %s\n", prefix, entry.Level, entry.Message)
 	}
+}
+
+// explainScriptAccess turns the server's early-access refusal into something a
+// person can act on. It arrives as a transport error whose text is a gRPC status
+// dump, which reads like an outage rather than an account setting.
+func explainScriptAccess(err error) error {
+	if err == nil || !strings.Contains(err.Error(), "FEATURE_NOT_ENABLED") {
+		return err
+	}
+	return errors.New("scripts run on BrowserVM, which is in early access and not enabled for this account.\n" +
+		"Request access at https://browserscale.cloud/browservm or through support.")
 }
 
 // errScriptFailed marks a script that threw, for an exit code without a second

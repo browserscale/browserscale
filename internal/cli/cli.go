@@ -73,13 +73,13 @@ func dispatch(args []string) error {
 	case "rent":
 		return runRent(args[1:])
 	case "run":
-		return runRun(args[1:])
+		return explainScriptAccess(runRun(args[1:]))
 	case "view":
 		return runView(args[1:])
 	case "stop":
 		return runStop(args[1:])
 	case "runs":
-		return runRuns(args[1:])
+		return explainScriptAccess(runRuns(args[1:]))
 	case "version", "--version", "-v":
 		fmt.Println("browserscale", cliVersion())
 		return nil
@@ -113,10 +113,10 @@ Your browsers:
   login       Save an API key for the commands below
   list        Show the sessions this key is paying for
   rent        Rent a session and leave it running
-  run         Run a script inside a session
+  run         Run a script inside a session (BrowserVM, early access)
   view        Watch and drive a session's screen
   stop        End a session
-  runs        Work with the scripts inside a session
+  runs        Work with the scripts inside a session (BrowserVM)
 
 Other:
   version     Print the CLI version

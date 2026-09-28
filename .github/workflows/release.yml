@@ -7,7 +7,8 @@ on:
 
 permissions:
   contents: write
-  # npm provenance signs the packages against this workflow run.
+  # npm trusted publishing: the registry accepts this run's OIDC identity in
+  # place of a token, and signs provenance against it.
   id-token: write
 
 jobs:
@@ -43,14 +44,35 @@ jobs:
       - name: Stage npm packages
         run: node scripts/build-npm.mjs --version "${GITHUB_REF_NAME#v}" --dist dist --out dist/npm
 
+      # Publishing uses npm trusted publishing (OIDC), never a stored token.
+      # A trusted publisher can only be attached to a package that already
+      # exists, so the first release of each package is published by hand and
+      # this stays off until every package trusts this workflow. Turn it on
+      # with the repository variable NPM_TRUSTED_PUBLISHING=true.
+      #
+      # Trusted publishing needs npm 11.5.1 or newer; Node 22 ships older.
+      - name: Update npm
+        if: vars.NPM_TRUSTED_PUBLISHING == 'true'
+        run: npm install -g npm@latest
+
       # Platform packages go first: the wrapper pins them exactly, so
-      # publishing it first would leave a window where installs fail.
+      # publishing it first would leave a window where installs fail. A version
+      # that is already on the registry is skipped, so a rerun, or a release
+      # whose packages were published by hand, finishes instead of failing.
       - name: Publish npm packages
+        if: vars.NPM_TRUSTED_PUBLISHING == 'true'
         run: |
           set -euo pipefail
+          publish() {
+            name="$(node -p "require('./$1/package.json').name")"
+            version="$(node -p "require('./$1/package.json').version")"
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already published, skipping"
+              return
+            fi
+            npm publish "$1" --access public --provenance
+          }
           for pkg in dist/npm/@browserscale/*; do
-            npm publish "$pkg" --access public --provenance
+            publish "$pkg"
           done
-          npm publish dist/npm/browserscale --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          publish dist/npm/browserscale

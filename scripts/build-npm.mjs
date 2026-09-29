@@ -147,7 +147,9 @@ function buildWrapperPackage(version, outDir) {
   );
   writeJSON(path.join(dir, "package.json"), manifest);
   copyFileSync(path.join(WRAPPER_SRC, "bin", "browserscale.js"), path.join(dir, "bin", "browserscale.js"));
-  copyFileSync(path.join(WRAPPER_SRC, "README.md"), path.join(dir, "README.md"));
+  // The repository README, so npm and GitHub never tell two different stories.
+  // It must keep using absolute links: npm does not resolve relative ones.
+  copyFileSync("README.md", path.join(dir, "README.md"));
   return dir;
 }
 

@@ -140,20 +140,23 @@ never matches is never buffered, never serialized and never sent.
 
 ## Bodies
 
-Bodies are off by default — you get headers and status only, which is
-what an audit or a DevTools-style list needs. Turn them on when you
-actually want the payload:
+**An exchange never carries a body.** It carries a body *id*. The
+browser keeps the bytes on its side while the capture runs, and you
+pull the ones you want with `ReadNetworkBody`. A capture that logs
+thousands of requests therefore costs you nothing for the payloads you
+never look at, and the event stream stays fast regardless of body size.
+
+Request bodies are always kept. Which response bodies are kept is
+chosen with `Bodies`:
 
 | Setting | Keeps |
 | --- | --- |
-| `"none"` *(default)* | Nothing. Headers, status and sizes only. |
-| `"text"` | Bodies whose MIME type is textual — JSON, HTML, CSS, JS, plain text. |
-| `"all"` | Every body regardless of type. |
+| `"none"` *(default)* | No response bodies. Headers, status and sizes only. |
+| `"text"` | Bodies whose MIME type is textual — JSON, HTML, CSS, JS, XML, plain text. |
+| `"all"` | Every body regardless of type, images and binaries included. |
 
-Prefer `"text"`. Binary payloads — images, fonts, video — **do not
-survive the browser boundary intact**, so `"all"` costs a lot of
-bandwidth to hand you bytes you cannot trust. Use it only when you know
-the bodies are textual but the MIME types lie.
+Bodies are stored byte for byte, after content decoding (gzip, brotli),
+so a PNG read back with `"all"` is the PNG the page received.
 
 `BodyPatterns` narrows body capture further, independently of which
 requests get logged. This is the combination you usually want: log
@@ -167,10 +170,13 @@ capture, err := browser.CaptureNetwork(ctx, browserscale.NetworkCaptureOptions{
     Bodies:       browserscale.NetworkBodiesText,
     BodyPatterns: []string{"*/api/*"},         // but only keep API payloads
 }, func(ex browserscale.NetworkExchange) {
-    if ex.ResponseBodyCaptured {
-        fmt.Println(ex.Url, len(ex.ResponseBody), "bytes")
+    if ex.ResponseBodyId != "" {
+        ids <- ex.ResponseBodyId // read it outside the handler
     }
 })
+
+// elsewhere
+body, truncated, err := browser.ReadNetworkBody(ctx, id)
 ```
 
 **TypeScript:**
@@ -181,19 +187,45 @@ const capture = await browser.captureNetwork({
     bodies: "text",
     bodyPatterns: ["*/api/*"],   // but only keep API payloads
 }, (ex) => {
-    if (ex.responseBodyCaptured) {
-        console.log(ex.url, ex.responseBody.length, "bytes");
-    }
+    if (ex.responseBodyId) ids.push(ex.responseBodyId); // read it outside the handler
 });
+
+// elsewhere
+const { data, truncated } = await browser.readNetworkBody(id);
+const json = JSON.parse(new TextDecoder().decode(data));
 ```
 
-Check `ResponseBodyCaptured` rather than testing the body for
-emptiness — it is what distinguishes "this response had no body" from
-"we did not keep it". `ResponseBodyTruncated` tells you the payload was
-larger than the server's cap and got cut.
+The id answers the question an empty body cannot: an exchange whose
+body was kept has an id, even if the body is zero bytes long; an
+exchange whose body was not kept has none. `ResponseBodySize` tells
+you how much there is before you read it.
 
-There is deliberately no byte-cap option. Buffer sizes bound memory on
-a machine shared with other sessions, so the server owns them.
+`ReadNetworkBody` assembles the whole body in memory. For large
+payloads, `ReadNetworkBodyRange` reads a slice by offset and length and
+reports the total size, so you can stream it to disk or only look at
+the first kilobytes.
+
+### How long bodies live
+
+Bodies belong to the session. They stay readable after the capture
+stops — so "record, stop, then inspect" works — and are deleted when
+the session closes. Starting a new capture does not discard the bodies
+of the previous one.
+
+Storage is bounded per body and per session, and the server owns both
+limits. A body larger than the per-body limit is kept up to it and
+flagged `Truncated`. When a session reaches its total, the oldest
+bodies of finished requests make room first; reading one of those
+fails with `evicted`. If you capture for hours, read what you need as
+you go instead of at the end.
+
+Reading fails with a `CommandError` whose code says why:
+
+| Code | Meaning |
+| --- | --- |
+| `not_found` | No body with this id exists in this session. |
+| `evicted` | It existed, but was dropped to stay within the session's storage. |
+| `unavailable` | The body could not be stored or read back. |
 
 ## What an exchange carries
 
@@ -219,7 +251,8 @@ received. The fields worth knowing, grouped by what they answer:
 | `Method`, `Url` | Verb and full URL. |
 | `RequestHeaders` | Name/value pairs, order preserved. |
 | `RequestHeadersAreWire` | Whether those are the bytes actually sent. |
-| `RequestBody` | Inline body only. File and streamed uploads set `RequestBodyTruncated` instead. |
+| `RequestBodyId`, `RequestBodySize` | The kept request body, read with `ReadNetworkBody`. Empty id when there was none. |
+| `RequestBodyTruncated` | Part of the body is missing: it hit the size limit, or it was a file or streamed upload, which are not kept. |
 
 **What came back?**
 
@@ -231,6 +264,8 @@ received. The fields worth knowing, grouped by what they answer:
 | `RemoteAddress` | Who answered. |
 | `ServedFrom` | `network`, `cache`, `serviceWorker`, `wrcStaticCache`, `wrcSynthetic`. |
 | `EncodedDataLength` | Bytes on the wire, not body size. `0` for a cache hit. |
+| `ResponseBodyId`, `ResponseBodySize` | The kept response body, decoded, read with `ReadNetworkBody`. Empty id when it was not kept. |
+| `ResponseBodyTruncated` | The kept body is shorter than what the page received: it hit the size limit, or the load ended early. |
 | `Error` | Net error name, e.g. `net::ERR_ABORTED`. Empty on success. |
 
 `ResourceType` is a string rather than a closed enum, so an exchange
@@ -354,8 +389,9 @@ void (async () => {
 ```
 
 Check `Dropped` when the capture ends. Anything above zero means the
-log has holes, and the fix is one of: make the handler cheaper, narrow
-`Patterns`, or stop capturing bodies.
+log has holes, and the fix is one of: make the handler cheaper, or
+narrow `Patterns`. Reading bodies counts as slow work — collect the
+ids in the handler and read them elsewhere.
 
 ## Stopping, and how a capture ends
 
@@ -461,11 +497,14 @@ than adding a second one. There is one capture per session.
 - **`Dropped` above zero means missing entries, not reordered ones.**
   The order you receive is always the order the browser finished the
   requests; drops remove the oldest, they never shuffle.
-- **Binary bodies are not trustworthy.** `"all"` will hand you image
-  and font payloads, but they do not cross the browser boundary
-  intact. If you need the bytes exactly, fetch the URL yourself.
-- **An empty body and an uncaptured body look the same.** Check
-  `ResponseBodyCaptured`.
+- **Exchanges carry ids, not bodies.** Read the bytes with
+  `ReadNetworkBody`; an empty id means the body was not kept.
+- **Bodies die with the session.** Read them before closing it, and
+  read early on long captures — the oldest go first once storage is
+  full.
+- **Bodies are decoded.** `ResponseBodySize` is the size after
+  gzip/brotli, which is why it is usually larger than
+  `EncodedDataLength`.
 - **Worker traffic has no `FrameId`.** Do not key your log by frame
   and expect service-worker requests to land somewhere.
 - **`fetch`, `XHR` and `EventSource` all report `fetch`.** The

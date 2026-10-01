@@ -1,7 +1,7 @@
 <!--
   url: https://browserscale.cloud/docs/guides/agentic-coding
   title: Agentic coding
-  description: Drive browserscale from an AI coding agent: connect the hosted MCP server at mcp.browserscale.cloud/mcp with a Bearer API key, then scaffold a runnable Go module with browserscale init and let your agent write the flow.
+  description: Let a coding agent build your automation: explore with the hosted MCP server, scaffold a runnable Go module with browserscale init, let the agent write the flow.
 -->
 
 # Agentic coding

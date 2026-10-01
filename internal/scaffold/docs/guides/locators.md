@@ -176,7 +176,7 @@ Two important caveats:
 
 - **Action-only.** Passing a `Node(...)` to `Wait` is rejected at send
   time with a clear error — wait conditions need a selector or a JS
-  expression so the server has something to *poll*.
+  expression so the page has something to *watch*.
 - **The id is per-document.** Navigate to a new URL and old
   backendNodeIds become stale. Re-resolve after every navigation.
 
@@ -214,7 +214,7 @@ Quick reference for "can I use *this* locator with *that* method?".
 | --- | --- | --- | --- |
 | `CSS(...)` | yes | yes | yes |
 | `JS(...)` | yes | yes | yes |
-| `Node(...)` | **no** — needs polling | yes | yes |
+| `Node(...)` | **no** — nothing to watch | yes | yes |
 | `At(...)` | **no** — needs an element | yes | **no** — needs an element |
 
 The `no` cells are validated client-side before the request goes out,
@@ -481,7 +481,7 @@ await browser.click(css("button.dismiss").inAllFrames());
 A short list of things that cause confusion on day one:
 
 - **`Node()` / `At()` as wait conditions** are rejected before the
-  request leaves the SDK. Wait needs something to poll — a selector or
+  request leaves the SDK. Wait needs something to watch — a selector or
   a JS expression — and neither of these provides one.
 - **`Visible` / `Steady` on actions are silently ignored.** They only
   affect wait. If you want to gate an action on visibility, do an

@@ -1,7 +1,7 @@
 <!--
   url: https://browserscale.cloud/docs/guides/captchas
   title: Captchas
-  description: Passive anti-bot challenges, interactive captchas, and the SolveCaptcha integration for the ones that need a human solver.
+  description: Passive checks pass on their own; interactive challenges are solved in the live session by browserscale's own solver. When to call SolveCaptcha, and when not to.
 -->
 
 # Captchas
@@ -19,7 +19,7 @@ unnecessary code.
 > - **Interactive challenges** — that's what `SolveCaptcha` is for. It detects, solves, and wires the result back into the page server-side.
 > - `SolveCaptcha(timeoutMs, retryAmount)` (Go) / `solveCaptcha({ timeoutMs, retryAmount })` (TS). Both default to `0` → server default (60 s budget, no retries).
 > - Returns an empty string on success — the solution is applied in-page, no follow-up call needed.
-> - Supports the common interactive challenge types you run into in the wild. The exact list moves over time; ping us on [Discord](https://discord.gg/wrc) for the current set.
+> - Supports the common interactive challenge types you run into in the wild. The exact list moves over time; ping us on [Discord](https://discord.gg/SfE9C9K28D) for the current set.
 > - `retryAmount` does **not** apply to every challenge type — some invalidate the page after a failed attempt and a retry is impossible.
 
 ## Passive vs interactive — when *not* to call `SolveCaptcha`
@@ -38,7 +38,7 @@ residential-grade exit IPs, no CDP-attached automation) is already
 designed to pass these. **No code required.** If you find a site
 that blocks browserscale on passive checks alone, that's a bug we want to
 hear about — open a ticket or message us on
-[Discord](https://discord.gg/wrc).
+[Discord](https://discord.gg/SfE9C9K28D).
 
 **Interactive challenges** are the ones you've seen: a checkbox
 ("I'm not a robot"), an image grid, a slider puzzle, a rotating
@@ -125,7 +125,7 @@ the retry at the script level (re-navigate, fresh attempt).
 into in the wild. We deliberately don't enumerate the supported
 providers here — the list shifts as both sides evolve, and the most
 accurate answer is always the current one. **For the up-to-date
-list, ping us on [Discord](https://discord.gg/wrc).** If you've got
+list, ping us on [Discord](https://discord.gg/SfE9C9K28D).** If you've got
 a site that uses a challenge we don't yet support, send us the URL
 and we'll usually have it queued within a release or two.
 
@@ -156,7 +156,7 @@ and we'll usually have it queued within a release or two.
 ## See also
 
 - [Loading pages](/docs/guides/loading) — first action you'll typically take before evaluating whether a challenge is on screen.
-- [Discord](https://discord.gg/wrc) — for the current list of supported challenge types.
+- [Discord](https://discord.gg/SfE9C9K28D) — for the current list of supported challenge types.
 - API reference: [Go `SolveCaptcha`](/docs/api-reference/go#SolveCaptcha) · [TS `solveCaptcha`](/docs/api-reference/ts#solveCaptcha).
 
 → Continue: [Shadow DOM & canvas](/docs/guides/shadow-canvas)

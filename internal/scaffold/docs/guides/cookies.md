@@ -1,24 +1,26 @@
 <!--
   url: https://browserscale.cloud/docs/guides/cookies
   title: Cookies, storage & sessions
-  description: Manage cookies, localStorage, session lifecycle, and fingerprint persistence via rent + Fingerprint() in browserscale.
+  description: Bring a user back across runs: cookies and storage as data, a signed-in login as one portable object, a pinned machine identity and reattaching to live sessions.
 -->
 
 # Cookies, storage & sessions
 
 The headline question this guide answers is: **how do I make the next
-session look like the same user as the last one?** Three pieces of state
+session look like the same user as the last one?** Four pieces of state
 control that — the cookies the browser is carrying, the localStorage the
-sites have written, and the fingerprint the browser is wearing — and all
-of them are designed to survive across rentals.
+sites have written, the account the browser itself is signed in to, and
+the machine the browser presents — and all of them are designed to
+survive across rentals.
 
 > **TL;DR**
 >
 > - Cookies live in the browser context. `GetCookies` / `SetCookies` / `ClearCookies` are the entire surface.
 > - The cookie identity is the `(name, domain, path)` tuple. `SetCookies` upserts on that key.
 > - localStorage has the same three-call surface: `GetStorage` / `SetStorage` / `ClearStorage`, grouped by origin. `SetStorage` accepts exactly what `GetStorage` returns, so a dump replays verbatim.
+> - A signed-in login travels as one object: `GetAuthSession` / `SetAuthSession` export the browser's signed-in account together with its device-bound sessions (DBSC), and bring them up signed in inside a fresh context.
 > - Every session is rented with a **fingerprint id** — either one you pin via `WithFingerprint(...)` / `withFingerprint(...)`, or one the server picks based on your country code. Read it back with `browser.Fingerprint()` (Go) / `browser.getFingerprint()` (TS).
-> - To impersonate the same user across runs: store the fingerprint id + cookies + storage on first rental, replay all of it on the next.
+> - To come back as the same user across runs: store the fingerprint id + cookies + storage (+ auth session) on first rental, replay all of it on the next.
 > - `ConnectSession` (Go) / `createWebSocketBrowser` (TS) reattach to an existing rental from another process. They do *not* extend the rental lifetime.
 
 ## The cookie surface
@@ -208,11 +210,66 @@ Two things this *doesn't* solve on its own:
 - The new session is on a different **exit IP** — a session cookie
   followed by an IP swap can also force a re-login.
 
-Both are fixable. The fingerprint side is the rest of this guide;
+Both are fixable. The fingerprint side is further down in this guide;
 the IP side comes down to reusing the same proxy (or pinning a
 country code if you're using managed proxies — see
 [`BrowserConfig`](/docs/api-reference/go#NewBrowserConfig) /
 [TS](/docs/api-reference/ts#BrowserConfig)).
+
+## A signed-in login as one object
+
+Cookies carry a site's session. Some logins live one level deeper: in
+the account the browser itself is signed in to, and in **device-bound
+sessions** (DBSC) that tie a site's session to a key held by that
+browser. Copying cookies alone does not bring those back — the site
+sees a session whose device key is missing and asks for the password
+again.
+
+`GetAuthSession` exports both as one portable `AuthSession`: the
+signed-in account with its refresh token, the binding key and device
+id that must travel with it, and every DBSC session of the context. It
+reads state in the browser process, so no page needs to be open, and
+returns nothing when the context has neither a sign-in nor DBSC
+sessions. `SetAuthSession` imports it into a fresh context, which then
+comes up signed in.
+
+**Go:**
+
+```go
+// First run: sign in, then export.
+auth, err := browser.GetAuthSession(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+if auth != nil {
+    buf, _ := json.Marshal(auth)
+    _ = os.WriteFile("auth.json", buf, 0o600)
+}
+
+// Next run, on a fresh rental: import before navigating.
+buf, _ := os.ReadFile("auth.json")
+var saved browserscale.AuthSession
+_ = json.Unmarshal(buf, &saved)
+_ = browser.SetAuthSession(ctx, saved)
+_, _ = browser.Navigate(ctx, "https://mail.google.com", 0)
+```
+
+**TypeScript:**
+
+```ts
+// First run: sign in, then export.
+const auth = await browser.getAuthSession();
+if (auth) await fs.writeFile("auth.json", JSON.stringify(auth), { mode: 0o600 });
+
+// Next run, on a fresh rental: import before navigating.
+const saved = JSON.parse(await fs.readFile("auth.json", "utf8"));
+await browser.setAuthSession(saved);
+await browser.navigate("https://mail.google.com");
+```
+
+Call `SetAuthSession` before the first navigation, and pair it with
+`SetCookies` / `SetStorage` to restore the whole persona. Treat the
+file like a password: the refresh token in it signs the account in.
 
 ## Session lifecycle in one paragraph
 
@@ -234,10 +291,14 @@ losing cookies, navigation state, or fingerprint.
 ## Fingerprint persistency
 
 This is where browserscale differs from spinning up a fresh headless Chrome
-every run. Each rental is provisioned with a **fingerprint** — a
-server-side bundle of UA string, `navigator.*` quirks, screen size,
-canvas/audio/WebGL responses, etc. — and that fingerprint has a
-**stable id** you can hold on to and replay.
+every run. Each rental is provisioned with a **fingerprint** — the
+machine the browser presents: user agent, platform, cores and memory,
+the GPU it reports, screen size, language and timezone — and that
+fingerprint has a **stable id** you can hold on to and replay.
+
+Rendering itself is never faked. Sessions run on real consumer GPUs,
+so canvas, WebGL and audio output is what that hardware actually
+produces; there is no spoofing layer for a deeper check to unmask.
 
 ### Default: server picks per country
 
@@ -289,9 +350,9 @@ What "same identity" gets you in practice:
 
 - **UA string** stays identical (Chrome version, OS, build).
 - **`navigator.*`** properties match (platform, hardwareConcurrency,
-  deviceMemory, plugins, etc.).
-- **Canvas/audio/WebGL** fingerprints reproduce — the deterministic
-  pixel data and audio buffer the site can hash for tracking.
+  deviceMemory, plugins, etc.) — in the main document, in every frame
+  and in every worker.
+- **The reported GPU** stays the same.
 - **Screen + viewport defaults** stay the same.
 - **Locale + timezone** carry across when you keep the same
   `WithCountryCode` / `WithTimezone`.
@@ -386,7 +447,10 @@ await browser.navigate("https://example.com/dashboard");
 If you're routing through your own proxy, persist
 `(proxyHost, proxyPort, proxyUsername, proxyPassword)` the same way
 — a stable exit-IP region on top of stable cookies and a stable
-fingerprint is the cleanest "returning user" signal you can send.
+fingerprint is the cleanest "returning user" signal you can send. If
+the flow signs in to the browser itself, add the
+[auth session](#a-signed-in-login-as-one-object) to the same file and
+import it before the first navigation.
 
 ## Reattaching to a live session
 
@@ -476,5 +540,6 @@ process that only has the id, use the standalone
 - [Core concepts](/docs/concepts) — the rent → drive → stop lifecycle.
 - [Quickstart](/docs/quickstart) — `BrowserConfig` parameters in context.
 - API reference: [Go `GetCookies` / `GetStorage` / `RentBrowser`](/docs/api-reference/go#GetCookies) · [TS `getCookies` / `getStorage` / `rentBrowser`](/docs/api-reference/ts#getCookies).
+- Auth sessions: [Go `GetAuthSession`](/docs/api-reference/go#GetAuthSession) · [TS `getAuthSession`](/docs/api-reference/ts#getAuthSession) and the [`AuthSession`](/docs/api-reference/go#AuthSession) type.
 
 → Continue: [Captchas](/docs/guides/captchas)

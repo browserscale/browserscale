@@ -101,9 +101,11 @@ await browser.click(css("button.pay"));
 ```
 
 Treat that triple — `Navigate → Wait → act` — as the default opening
-move for any new flow. It is the price of browserscale's "no implicit waiting"
-design and it pays back as scripts that survive page-load changes
-later.
+move for any new flow. The click would find its button on its own, but
+only within its 5 s budget; the `Wait` is what says the page is usable,
+with a budget sized for a page load, and it can race the page you
+wanted against an error or a challenge. It pays back as scripts that
+survive page-load changes later.
 
 ## LoadHTML
 

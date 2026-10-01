@@ -1,7 +1,7 @@
 <!--
   url: https://browserscale.cloud/docs/guides/interaction
   title: Interacting with the page
-  description: Click, fill, hover, scroll, drag, select and key events — every input gesture browserscale's real cloud Chromium exposes, with human-like mouse movement.
+  description: Click, fill, hover, scroll, drag and select. Actions find their target, wait for it to settle, check the pixel before pressing and name whatever blocked them.
 -->
 
 # Interaction
@@ -15,8 +15,8 @@ of options that come up often enough to be worth memorising.
 
 > **TL;DR**
 >
-> - Every action takes a `Locator` (see [Targeting elements](/docs/guides/locators)) and dispatches **exactly once** — there is no implicit retry.
-> - Pre-flight: the server scrolls the element into view, then animates the cursor along a human-like path before the actual gesture fires.
+> - Every action takes a `Locator` (see [Targeting elements](/docs/guides/locators)). `Click`, `Fill` and `Drag` acquire their target themselves: re-located for up to 5 s, scrolled into view, held until it stops moving. That covers an element rendering a moment late; after a `Navigate` or a submit, [`Wait`](/docs/guides/waiting) for the next page first, with a timeout for that step.
+> - Pre-flight: the cursor moves there along a human-like path, and the exact point is verified to belong to the element before the button goes down. If something covers it, the pointer re-aims at an exposed part once; if it is still covered, the action refuses and names the blocker instead of pressing whatever lies on top.
 > - Go splits the bare and the customised variant into two methods (`Click` / `ClickWith`). TypeScript keeps one method and an optional `opts` argument.
 > - Three keyboard-level escape hatches sit alongside the element verbs: `InsertText` (paste at caret), `PressKey` / `ReleaseKey` (raw down/up events).
 > - A failed action tells you *why*: a typed `ClickError` / `FillError` / … (carrying an `occluder`) when the element was found but the gesture was blocked, versus a plain `ELEMENT_NOT_FOUND` / `TIMEOUT` when it never showed up.
@@ -29,14 +29,19 @@ you know all of them:
 1. You pass a `Locator` — built with `CSS(...)` / `JS(...)` /
    `Node(...)` / `At(...)`. The locator's *modifiers* (`.InFrame(...)`,
    `.InAllFrames()`) are honoured.
-2. The server resolves the element, **scrolls it into view** if
-   needed (walking nested scroll containers and out-of-process iframe
-   chains), then **animates the mouse cursor** along a Perlin-noise
-   path to a random point inside the element's bounding rect.
-3. The gesture (click, fill, drag…) fires *once*. No retry, no
-   implicit wait — if the element wasn't there, you get
-   `ELEMENT_NOT_FOUND` straight away.
-4. You get back an `ElementResult` (or a `DragResult` / a
+2. The browser resolves the element — for `Click`, `Fill` and `Drag`
+   it keeps re-locating it for up to 5 s if it is not there yet —
+   **scrolls it into view** (walking nested scroll containers and
+   out-of-process iframe chains) and waits until its bounds stop
+   moving.
+3. It **moves the cursor** along a human-like path to a random point
+   inside the element and verifies that the point really belongs to
+   the element, across frame and process boundaries. Covered, it
+   re-aims at the exposed part once; still covered, it refuses with a
+   typed error naming the blocker. It never presses whatever happens
+   to lie on top.
+4. The gesture (click, fill, drag…) fires once.
+5. You get back an `ElementResult` (or a `DragResult` / a
    `SelectOptionResult`) carrying the resolved `frameId`,
    `backendNodeId`, post-scroll `isVisible`, the element's `bounds`
    and the root-viewport coordinates (`rootX` / `rootY`) where the
@@ -73,9 +78,10 @@ await browser.click(css("li.menu"), { button: "right", clickCount: 2 });
 
 ## Click
 
-The workhorse. By default: scroll into view, hand-shaped mouse path,
-full `mouseDown` + `mouseUp` at a randomised point inside the
-element's bounding rect.
+The workhorse. By default: find the element within 5 s, scroll it
+into view, wait for it to hold still, move there on a hand-shaped
+path, verify the point, then a full `mouseDown` + `mouseUp` at a
+randomised point inside the element's bounding rect.
 
 `ClickOpts` covers the three things you might want to vary:
 
@@ -119,9 +125,15 @@ the DOM.
 ## Fill
 
 Anywhere you'd type into an input: `<input>`, `<textarea>`,
-`contenteditable` divs. Under the hood: scroll into view, mouse path,
-click to focus, then **character-by-character key events** with QWERTZ
-keyboard simulation and human-like timing.
+`contenteditable` divs. Under the hood: the same target acquisition as
+`Click`, a click to focus, then **character-by-character key events**
+on the keyboard layout of the session's region, with human-like timing.
+
+`Fill` is bound to its target. If something else takes focus half way
+through, the rest of the value is never typed into it: the browser
+tries to re-focus the field and otherwise fails with `focus_stolen`,
+naming the element that took focus. For one-time-code boxes that move
+focus themselves on every digit, use the deliberately loose `Type`.
 
 **`Fill` appends by default.** It does not wipe the field first — what
 you pass in is typed on top of whatever is already there. That matches
@@ -164,7 +176,7 @@ per-key events, jump straight to `InsertText` (further down).
 ## MoveTo
 
 Move the mouse cursor over an element (or to coordinates) without
-clicking. The same scroll-into-view + Perlin-noise animation as
+clicking. The same scroll-into-view and human-like cursor path as
 `Click`, just stopping at the hover.
 
 Useful for triggering CSS / JS hover states (dropdown menus,
@@ -250,9 +262,9 @@ await browser.dragBy(css(".slider .handle"), 120, 0);
 await browser.dragTo(css(".card.draggable"), 800, 400);
 ```
 
-Both variants go through the same gesture: mouse-move to the pickup
-point inside the element, `mouseDown`, drag along a Perlin-noise path
-to the target, `mouseUp`. The `DragResult` carries *both* endpoints —
+Both variants go through the same gesture: the handle is acquired like
+a `Click` target, then mouse-move to the pickup point inside it,
+`mouseDown`, drag along a human-like path to the target, `mouseUp`. The `DragResult` carries *both* endpoints —
 `startX` / `startY` for the pickup, `endX` / `endY` for the drop — so
 you can verify where the gesture actually started and ended.
 
@@ -408,8 +420,11 @@ A quick recap of what the server does for you so you don't have to:
 | `InsertText` | — | — | input (no key events) |
 | `PressKey` / `ReleaseKey` | — | — | keydown / keyup |
 
-If you find yourself reaching for a manual `ScrollTo` before every
-`Click`, you don't need to — `Click` already does it.
+`Click`, `Fill` and `Drag` additionally re-locate their target for up
+to 5 s, wait for it to settle and verify the point before pressing.
+A manual `ScrollTo` before a `Click` is never needed. A `Wait` is,
+wherever the page first has to load or change — see
+[Waiting](/docs/guides/waiting#when-to-wait).
 
 ## When an action fails
 
@@ -423,7 +438,8 @@ apart so you can recover intelligently instead of blindly retrying:
   or `INVALID_LOCATOR`. Nothing on the page was touched.
 - **The element was there, but the gesture couldn't land.** The
   classic case: another element — a cookie banner, a modal overlay —
-  was covering your target at the exact point the gesture would fire.
+  was still covering your target at the exact point the gesture would
+  fire, even after the pointer re-aimed.
   This surfaces as a **typed error** carrying the detail you need to
   recover: `ClickError` with an `occluder` describing the blocker, and
   the matching `FillError` / `DragError` / `MoveError` / `ScrollError`
@@ -483,9 +499,12 @@ tripped over it.
 
 ## Gotchas
 
-- **Actions don't wait.** Pair every action with a `Wait` for the
-  element you're about to touch. See [Waiting](/docs/guides/waiting)
-  for the full discussion.
+- **Actions wait for their target, not for your outcome.** `Click`
+  finds the button; it does not know whether the next page should be
+  the dashboard or an error. Wait for that afterwards — see
+  [Waiting](/docs/guides/waiting). For overlays that may or may not
+  appear, register a [reaction](/docs/guides/reactions) once instead of
+  handling them before every click.
 - **Validation is client-side, not server-side.** `Drag` / `Fill` /
   `Select*` / `ScrollTo` reject `At(x, y)` before the request ever
   leaves your machine — you get an immediate, descriptive error rather
@@ -505,8 +524,9 @@ tripped over it.
 ## See also
 
 - [Targeting elements](/docs/guides/locators) — the constructors and modifiers every action accepts.
-- [Waiting](/docs/guides/waiting) — the explicit pause every action needs in front of it.
+- [Waiting](/docs/guides/waiting) — waiting for the outcome of an action.
+- [Reactions](/docs/guides/reactions) — cookie banners and modals, handled by the browser.
 - API reference: [Go interaction methods](/docs/api-reference/go#Click) · [TS interaction methods](/docs/api-reference/ts#click).
 - Error types: [Go `ClickError`](/docs/api-reference/go#ClickError) · [TS `ClickError`](/docs/api-reference/ts#ClickError) and their `OccluderInfo`.
 
-→ Continue: [Reading the page](/docs/guides/reading)
+→ Continue: [Reactions](/docs/guides/reactions)

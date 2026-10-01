@@ -1,7 +1,7 @@
 <!--
   url: https://browserscale.cloud/docs
   title: Docs
-  description: browserscale documentation: real cloud Chromium with waits, clicks, frames and network handled inside the engine. Drive it from Go, TypeScript, the CLI or MCP. Quickstart, guides and the full SDK reference.
+  description: browserscale docs: cloud Chromium with waits, clicks, frames and network handled in the engine, driven from Go, TypeScript, the CLI or MCP. Guides and SDK reference.
 -->
 
 # Introduction
@@ -65,7 +65,7 @@ browser binary or operating a browser farm.
   may or may not appear. The browser fires it on its own, across every frame
   and navigation, between your calls, and then retires it.
 
-→ [Waiting](/docs/guides/waiting) · [Loading pages](/docs/guides/loading) · [Go `AddReaction`](/docs/api-reference/go#AddReaction)
+→ [Waiting](/docs/guides/waiting) · [Reactions](/docs/guides/reactions) · [Loading pages](/docs/guides/loading)
 
 ### Frames without bookkeeping
 

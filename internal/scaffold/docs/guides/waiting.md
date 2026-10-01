@@ -1,65 +1,109 @@
 <!--
   url: https://browserscale.cloud/docs/guides/waiting
   title: Waiting
-  description: Explicit waits, timeouts, and the arm-before-trigger pattern every browserscale script needs to stay deterministic.
+  description: Wait after every navigation and page change, with a timeout per step. Race success, error and challenge states, get the matched element and frame, and a per-condition diagnosis on timeout.
 -->
 
 # Waiting
 
 Pages take time. Network round-trips, JS bundles, animations, third-party
 widgets, captchas — there is almost always a moment between *"I told the
-browser to do something"* and *"the thing I want is on the page"*. The
-job of `Wait` is to bridge that gap honestly: poll the page until what
-you described is actually there, then return — or give up with a clear
-error if it never arrives.
+browser to do something"* and *"the page is in the state I need"*. The
+job of `Wait` is to bridge that gap honestly: return the moment what you
+described holds, tell you which of your conditions it was — or give up
+with a diagnosis of how close each one came.
 
 > **TL;DR**
 >
-> - Actions never auto-wait. If the element isn't there yet, `Click` returns `ELEMENT_NOT_FOUND` immediately.
-> - `Wait` polls one or more locator conditions on the server side and returns when the first one matches.
-> - Default timeout is 30 s. Override with `Timeout(ms)` in Go / `{ timeoutMs }` in TS.
-> - The returned `WaitResult` tells you *which* condition matched (`.index`) and where (`backendNodeId`, `frameId`, `bounds`).
+> - `Wait` marks every point where the page has to get somewhere: after a `Navigate`, after a submit, after any step that loads a new page or view. Wait for the element you need next, with a timeout sized for that step.
+> - One condition or several. Race the outcomes a step can have (next page, form error, challenge) and branch on the `Index` that matched.
+> - The documents a condition concerns report the moment it holds; nothing re-checks on a timer while the page is idle.
+> - Default timeout is 30 s. Override per call with `Timeout(ms)` in Go / `{ timeoutMs }` in TS.
+> - `Click`, `Fill` and `Drag` also find their own target, for up to 5 s. That covers an element rendering a moment late, not a page load.
+> - On timeout, a `WaitError` says per condition how far it got: `not_found`, `found_hidden`, `found_occluded` (with the element covering it) or `pending_steady`.
 
-## Why Wait exists
+## When to wait
 
-Other automation tools auto-wait inside every action — Playwright's
-`page.click('button')` will internally wait up to 30 s for the element
-to be actionable. browserscale actions do not. Every action method dispatches
-exactly once, and if the target is missing you get an immediate error
-from the server.
+A flow is a series of steps, and between most of them the page has
+work to do: `Navigate` returns when the document commits, before the
+page's JavaScript has built anything; a submitted form goes to a server
+that may take ten seconds to answer; a single-page app swaps views
+without navigating at all. `Wait` is how a script says *"this is where
+the page has to get somewhere, and this is how long it may take"*.
 
-That tradeoff is deliberate. Auto-waiting hides what the script is
-actually doing, and on the kinds of pages browserscale is built for — anti-bot,
-heavy JS, multi-step flows — implicit waiting is what turns a five-line
-script into a five-minute mystery when something breaks. With explicit
-`Wait`, every pause is something you can see in your code.
+Three situations call for it:
 
-The rule of thumb:
+- **After every `Navigate`, and every step that changes the page.**
+  Wait for the element the next step needs, with a budget that fits the
+  page — a slow sign-up page gets 25 s, not the 5 s an action allows
+  itself.
+- **When the next step depends on what happened.** After submitting,
+  the page can show the next step, an error, a challenge or a login
+  modal. Pass all of them, get back the one that happened.
+- **Before reading.** An `Evaluate` or `GetObservation` sees the page
+  as it is right now; wait for the state you want to read first.
 
 **Go:**
 
 ```go
-// Anti-pattern: hope the button is there in time.
-_, _ = browser.Click(ctx, browserscale.CSS("button.submit"))
+_, _ = browser.Navigate(ctx, "https://signup.example/", 0)
 
-// Pattern: describe what you're waiting for, then act.
-_, _ = browser.Wait(ctx, browserscale.CSS("button.submit"))
-_, _ = browser.Click(ctx, browserscale.CSS("button.submit"))
+// The page is usable once the email field is there. Give it time.
+_, err := browser.Wait(ctx, browserscale.CSS("input[name=email]"), browserscale.Timeout(25000))
+if err != nil {
+    return err // says whether the field never appeared, stayed hidden or was covered
+}
+_, _ = browser.Fill(ctx, browserscale.CSS("input[name=email]"), email)
+_, _ = browser.Click(ctx, browserscale.CSS("button[type=submit]"))
+
+// Next step, an error, or a challenge. Branch on what happened.
+r, err := browser.Wait(ctx,
+    browserscale.CSS("input[type=password]"),       // index 0
+    browserscale.CSS(".error-message"),             // index 1
+    browserscale.CSS("iframe[title*=challenge]").InAllFrames(), // index 2
+    browserscale.Timeout(25000),
+)
 ```
 
 **TypeScript:**
 
 ```ts
-// Anti-pattern: hope the button is there in time.
-await browser.click(css("button.submit"));
+await browser.navigate("https://signup.example/");
 
-// Pattern: describe what you're waiting for, then act.
-await browser.wait(css("button.submit"));
-await browser.click(css("button.submit"));
+// The page is usable once the email field is there. Give it time.
+await browser.wait(css("input[name=email]"), { timeoutMs: 25000 });
+await browser.fill(css("input[name=email]"), email);
+await browser.click(css("button[type=submit]"));
+
+// Next step, an error, or a challenge. Branch on what happened.
+const r = await browser.waitAny(
+    [
+        css("input[type=password]"),              // index 0
+        css(".error-message"),                    // index 1
+        css("iframe[title*=challenge]").inAllFrames(), // index 2
+    ],
+    { timeoutMs: 25000 },
+);
 ```
 
-You will write that `Wait → act` pair a lot. Get comfortable with it
-early.
+`Navigate → Wait → act` and `act → Wait`: you will write these pairs
+a lot, and they make a flow readable too — every `Wait` is a place
+where the page changes.
+
+### What actions already do
+
+`Click`, `Fill` and `Drag` do a short wait of their own: they re-locate
+the target for up to 5 s, scroll it into view, hold until its bounds
+stop moving and verify the point before pressing. So an element that
+renders a few frames after the one before it needs nothing extra.
+
+That budget belongs to the action, not to the page. It is short on
+purpose, so a wrong selector fails fast. For anything that can take
+longer — a page load, a redirect chain, a server answering a form —
+put a `Wait` in front with a timeout for that step. (`Fill` also takes
+a `TimeoutMs` for its own budget; `Click`'s stays at 5 s.) A timed-out
+`Wait` also tells you *how far* the element got, which a click that
+gave up cannot.
 
 ## Anatomy of a wait
 
@@ -68,13 +112,15 @@ A `Wait` call carries three things:
 1. **One or more locator conditions** — anything `CSS(...)` or `JS(...)`
    produces. (`Node` and `At` are rejected client-side; see the
    [Targeting elements guide](/docs/guides/locators) for why.)
-2. **A timeout** — how long to keep polling before giving up.
+2. **A timeout** — how long to wait before giving up.
 3. **An implicit frame scope** — main frame by default, or whatever
    the *first condition that has* `.InFrame(...)` / `.InAllFrames()`
    on it specifies (see the frame section below).
 
-The server polls all conditions in the target frame on a fast
-interval and returns the *first* one to match. The others are
+Each condition is handed to the documents it concerns, and each
+document reports the moment the condition starts holding — so a match
+usually arrives within a frame or two, and an idle page costs nothing
+while you wait. The *first* condition to match wins. The others are
 abandoned — there is no second-place winner.
 
 The result is a `WaitResult` with five fields:
@@ -128,16 +174,23 @@ A few things are happening implicitly here:
 
 ## Custom timeout
 
-A common case is *"give up faster than the default 30 s"*, for instance
-because you race a slow path against a fast one and want to switch
-strategy quickly.
+The timeout is per call, so size it for the step it guards. A sign-up
+page behind a slow backend or a queue can take well over the default;
+a toast after a save should be there within seconds, and waiting 30 s
+for it only makes the failure slow.
 
 **Go:**
 
 ```go
-// 5 seconds, after that bail.
+// A slow page: give it longer than the default.
 _, err := browser.Wait(ctx,
-    browserscale.CSS(".result"),
+    browserscale.CSS("#otp-code"),
+    browserscale.Timeout(40000),
+)
+
+// A toast: if it is not there in 5 s, it is not coming.
+_, err = browser.Wait(ctx,
+    browserscale.CSS(".toast-saved"),
     browserscale.Timeout(5000),
 )
 ```
@@ -145,8 +198,11 @@ _, err := browser.Wait(ctx,
 **TypeScript:**
 
 ```ts
-// 5 seconds, after that bail.
-await browser.wait(css(".result"), { timeoutMs: 5000 });
+// A slow page: give it longer than the default.
+await browser.wait(css("#otp-code"), { timeoutMs: 40000 });
+
+// A toast: if it is not there in 5 s, it is not coming.
+await browser.wait(css(".toast-saved"), { timeoutMs: 5000 });
 ```
 
 In Go, `Timeout(ms)` is one of the variadic arguments to `Wait`. In
@@ -213,17 +269,19 @@ switch (r.index) {
 
 A few notes on the race:
 
-- The first condition that matches at any poll wins; the others are
-  abandoned. Polling is fast enough that the order of conditions in
-  the list is rarely observable in practice.
+- The first condition to start holding wins; the others are
+  abandoned. The order of conditions in the list does not decide
+  anything.
 - The condition list is open-ended; you can mix `CSS` and `JS`, with
   different `.Visible(...)` / `.Steady(...)` modifiers per locator.
 - On timeout you get a typed `WaitError` and no result. Its
-  `conditions` array reports, *per locator you passed*, whether that
-  condition was ever **found** and whether it ever became **visible**
-  / **steady** — so you can see which branch was close and which never
-  appeared at all. Go unwraps it with `errors.As`; TypeScript matches
-  it with `instanceof WaitError`.
+  `conditions` array reports, *per locator you passed*, the last state
+  it reached: `not_found` (never appeared), `found_hidden` (rendered but
+  not visible), `found_occluded` (visible but covered, with the covering
+  element as `occluder`) or `pending_steady` (there, but still moving).
+  Those four need four different fixes, which is why they are reported
+  separately. Go unwraps it with `errors.As`; TypeScript matches it with
+  `instanceof WaitError`.
 
 This is also how you handle pages that load progressively: race the
 final element you actually want against an error toast that means
@@ -238,6 +296,8 @@ yet. Two practical consequences:
 1. To wait in a known iframe, put `.InFrame(id)` on (at least) one of
    the conditions.
 2. To search every frame, put `.InAllFrames()` on (at least) one.
+   That includes frames created while the wait is running, so there
+   is no need to wait for an iframe before waiting for what is in it.
 
 **Go:**
 
@@ -322,6 +382,10 @@ the click ran, the selector resolved to a different element Y".
   `Evaluate("...condition...")` with sleeps in between, you've
   re-implemented `Wait` — badly. Use `JS(...)` as a wait condition
   instead.
+- **Letting an action's 5 s cover a page load.** Right after a
+  `Navigate` or a submit, a bare `Click` works on a fast day and times
+  out on a slow one. Put a `Wait` with a budget for that step in front.
+  Within a page that is already there, the action's own wait is enough.
 - **Pre-emptive `Wait`s on top of explicit results.** When you already
   hold a `WaitResult` or an `ElementResult` for an element, you don't
   need to wait for it again before acting — pass `Node(backendNodeId)`
@@ -373,11 +437,12 @@ longer than the smaller of the two.
 ## Gotchas
 
 - **A wait is not an action.** It does not click, scroll, or otherwise
-  change the page. If your script *only* waits and never interacts, you
-  probably wrote the wrong thing.
+  change the page. For something that may or may not appear and just
+  needs dismissing — a cookie banner, a newsletter modal — register a
+  [reaction](/docs/guides/reactions) instead of waiting for it.
 - **`Wait` rejects `Node(...)` and `At(...)` client-side.** These two
-  locators don't carry a selector or JS expression for the server to
-  poll. The SDK throws before sending.
+  locators don't carry a selector or JS expression for the page to
+  watch. The SDK throws before sending.
 - **No `WaitOpts.InFrame`.** As covered above, the frame for a wait
   comes from the first condition that has one. There is no separate
   call-level `InFrame` for `Wait` (unlike actions, which do have it).
@@ -386,6 +451,7 @@ longer than the smaller of the two.
 
 - [Targeting elements](/docs/guides/locators) — the locator constructors and modifiers `Wait` accepts.
 - [Frames & iframes](/docs/guides/frames) — how the frame tree works and what `InAllFrames` actually iterates.
+- [Reactions](/docs/guides/reactions) — for the banner that may or may not appear.
 - API reference: [Go `Wait`](/docs/api-reference/go#Wait) · [TS `wait` / `waitAny`](/docs/api-reference/ts#wait).
 - Timeout diagnostics: [Go `WaitError`](/docs/api-reference/go#WaitError) · [TS `WaitError`](/docs/api-reference/ts#WaitError) and its per-condition `WaitConditionStatus`.
 

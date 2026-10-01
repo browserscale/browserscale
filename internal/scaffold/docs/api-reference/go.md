@@ -201,11 +201,10 @@ _, err := browser.ClickWith(ctx, browserscale.CSS("li.menu"), browserscale.Click
 ### `Close()`
 
 *method on `CloudBrowser`*
-*inherits from `CloudBrowser.StopBrowser`*
 
-Close is the defer-friendly alias for CloudBrowser.StopBrowser that uses a background context.
+Close is the defer-friendly form of CloudBrowser.StopBrowser: it uses a background context and drops the final usage. Call StopBrowser instead when you want the usage.
 
-Useful when a session id was persisted across processes and the rental outlived the original handle. Only calls the rent stop endpoint; there is no gRPC connection to close in this form.
+Reports a plain error when the stop API or the connection close fails. The session is released either way; retrying a stop is safe.
 
 ```go
 browser, err := browserscale.RentBrowser(ctx, cfg)
@@ -701,6 +700,23 @@ if err != nil { log.Fatal(err) }
 // configure your RTCPeerConnection with ice, then create an offer …
 ```
 
+### `GetUsage() → *SessionUsage`
+
+*method on `CloudBrowser`*
+
+GetUsage reports what this session's browser has consumed so far.
+
+Everything but MinMemory and AverageMemory only ever grows, so polling and diffing two readings gives the cost of what ran in between. The final figures need no call of their own: CloudBrowser.StopBrowser returns them.
+
+**Returns:** `*SessionUsage` — *SessionUsage as of now
+
+```go
+before, _ := browser.GetUsage(ctx)
+_, _ = browser.Navigate(ctx, "https://example.com", 0)
+after, _ := browser.GetUsage(ctx)
+fmt.Printf("navigation cost %.2fs of CPU\n", after.CpuTime-before.CpuTime)
+```
+
 ### `GrpcUrl() → string`
 
 *method on `CloudBrowser`*
@@ -995,6 +1011,59 @@ res, err := browser.ReadCanvasWith(ctx, browserscale.CSS("canvas"),
 ```
 
 **See also:** CloudBrowser.ReadCanvasWith for format, quality, or a sub-rectangle · CommandError for recovering the code with errors.As
+
+### `ReadNetworkBody(bodyId string) → []byte, bool`
+
+*method on `CloudBrowser`*
+
+ReadNetworkBody reads a whole captured body: an exchange's RequestBodyId or ResponseBodyId.
+
+Bodies are stored by the browser, not sent with the exchange, so reading one is a separate call. They stay readable after the capture stops, until the session ends.
+
+The body is fetched in ranges and assembled in memory. For very large bodies, use CloudBrowser.ReadNetworkBodyRange to process them piece by piece.
+
+**Parameters:**
+- `bodyId` (`string`) — RequestBodyId or ResponseBodyId from a NetworkExchange
+
+**Returns:** `[]byte, bool` — []byte holding the body, bool reporting whether the kept body is
+
+```go
+capture, _ := browser.CaptureNetwork(ctx, browserscale.NetworkCaptureOptions{
+    Patterns: []string{"*/api/*"},
+    Bodies:   browserscale.NetworkBodiesText,
+}, func(ex browserscale.NetworkExchange) {
+    if ex.ResponseBodyId == "" {
+        return
+    }
+    go func() {
+        body, _, err := browser.ReadNetworkBody(ctx, ex.ResponseBodyId)
+        if err == nil {
+            fmt.Println(ex.Url, len(body))
+        }
+    }()
+})
+defer capture.Stop(ctx)
+```
+
+**See also:** CommandError for recovering the code with errors.As
+
+### `ReadNetworkBodyRange(bodyId string, offset int64, length int64) → *NetworkBodyRange`
+
+*method on `CloudBrowser`*
+*inherits from `CloudBrowser.ReadNetworkBody`*
+
+ReadNetworkBodyRange reads up to length bytes of a captured body starting at offset.
+
+A single call returns at most 2 MiB; length 0 reads that much. Loop on offset + len(Data) until it reaches TotalSize to stream a large body.
+
+**Parameters:**
+- `bodyId` (`string`) — RequestBodyId or ResponseBodyId from a NetworkExchange
+- `offset` (`int64`) — first byte to read
+- `length` (`int64`) — bytes to read; 0 reads the per-call maximum
+
+**Returns:** `*NetworkBodyRange` — *NetworkBodyRange with the bytes and the body's total size, and an
+
+**See also:** CommandError for recovering the code with errors.As
 
 ### `ReleaseDomSubtree(backendNodeId int32, frameId string)`
 
@@ -2043,7 +2112,7 @@ NetworkCapture is a running capture, returned by CloudBrowser.CaptureNetwork. Ex
 
 *method on `NetworkCapture`*
 
-Dropped reports how many exchanges the server discarded because this reader fell behind. Anything above zero means the log has holes: make the handler cheaper, narrow Patterns, or stop capturing bodies.
+Dropped reports how many exchanges the server discarded because this reader fell behind. Anything above zero means the log has holes: make the handler cheaper or narrow Patterns.
 
 **Returns:** `uint64`
 
@@ -2380,7 +2449,7 @@ Unused credits are refunded per session, as with StopBrowser.
 stopped, err := browserscale.StopAllBrowsers(ctx, apiKey)
 ```
 
-### `StopBrowser(apiKey string, sessionId string)`
+### `StopBrowser(apiKey string, sessionId string) → *SessionUsage`
 
 *function*
 
@@ -2392,8 +2461,10 @@ Useful when a session id was persisted across processes and the rental outlived 
 - `apiKey` (`string`) — API key the session was rented with
 - `sessionId` (`string`) — id of the session to release
 
+**Returns:** `*SessionUsage` — *SessionUsage what the session consumed over its whole life; nil
+
 ```go
-_ = browserscale.StopBrowser(context.Background(), apiKey, sessionId)
+usage, err := browserscale.StopBrowser(context.Background(), apiKey, sessionId)
 ```
 
 ### `Timeout(ms float64) → WaitArg`
@@ -2584,11 +2655,11 @@ FillOpts customizes a CloudBrowser.FillWith call. Zero/empty values mean "use th
 
 NetworkCaptureOptions configures CloudBrowser.CaptureNetwork.
 
-There is deliberately no byte-cap option: buffer sizes bound memory on a machine shared with other sessions, so the server owns them.
+There is deliberately no byte-cap option: kept bodies are stored on a machine shared with other sessions, so the server owns the quota. When a session's bodies exceed it, the oldest are dropped first.
 
 **Fields:**
 - `Patterns` (`[]string`) — Patterns are URL wildcards to capture; nil captures every request the session makes. Prefix a pattern with "!" to exclude it, which is the short way to say "everything except this".
-- `Bodies` (`NetworkBodies`) — Bodies selects response-body capture. Empty means NetworkBodiesNone.
+- `Bodies` (`NetworkBodies`) — Bodies selects response-body capture. Empty means NetworkBodiesNone. Request bodies are kept whenever a request has one.
 - `BodyPatterns` (`[]string`) — BodyPatterns narrows body capture to a subset of the captured requests; nil applies Bodies to all of them. Use it to log every request but only keep the payloads you care about.
 
 ### `ObservationOpts`
@@ -3086,7 +3157,18 @@ InterceptedRequest describes an outgoing request captured by CloudBrowser.WaitFo
 
 `type NetworkBodies = string`
 
-NetworkBodies selects how much of a response body network capture keeps.
+NetworkBodies selects which response bodies network capture keeps. Kept bodies are not part of the exchange; read them with CloudBrowser.ReadNetworkBody.
+
+### `NetworkBodyRange`
+
+*struct*
+
+NetworkBodyRange is one range of a captured body, as returned by CloudBrowser.ReadNetworkBodyRange.
+
+**Fields:**
+- `Data` (`[]byte`) — Data holds the bytes read; empty past the end of the body.
+- `TotalSize` (`int64`) — TotalSize is the number of bytes kept for the body as a whole.
+- `Truncated` (`bool`) — Truncated matches the exchange's truncated flag for this body.
 
 ### `NetworkExchange`
 
@@ -3108,8 +3190,9 @@ A redirect chain arrives as one exchange per hop: the hops share ChainId and cou
 - `InitiatorUrl` (`string`) — InitiatorUrl is the origin that started the request; empty when the browser itself did.
 - `RequestHeaders` (`[]Header`)
 - `RequestHeadersAreWire` (`bool`) — RequestHeadersAreWire reports whether RequestHeaders are the bytes actually sent — Cookie, User-Agent and Sec-* included — rather than what the page asked for before the network stack filled in the rest.
-- `RequestBody` (`[]byte`) — RequestBody holds an inline body only. File and streamed uploads set RequestBodyTruncated instead of appearing here.
-- `RequestBodyTruncated` (`bool`)
+- `RequestBodyId` (`string`) — RequestBodyId names the request body; read it with CloudBrowser.ReadNetworkBody. Empty when the request had no body. Bodies never travel with the exchange.
+- `RequestBodySize` (`int64`) — RequestBodySize is the number of bytes kept for the request body.
+- `RequestBodyTruncated` (`bool`) — RequestBodyTruncated reports that part of the request body is missing: it hit the per-body cap, or it was a file or streamed upload, which are not kept.
 - `HasResponse` (`bool`) — HasResponse is false when the request failed before any response arrived; Error then says why.
 - `StatusCode` (`int32`)
 - `StatusText` (`string`)
@@ -3119,9 +3202,9 @@ A redirect chain arrives as one exchange per hop: the hops share ChainId and cou
 - `ServedFrom` (`NetworkServedFrom`)
 - `ResponseHeaders` (`[]Header`)
 - `ResponseHeadersAreWire` (`bool`)
-- `ResponseBody` (`[]byte`) — ResponseBody is populated only when body capture was requested for this URL and applied; check ResponseBodyCaptured to tell an empty body from an uncaptured one. Binary content does not survive the browser boundary intact — see NetworkBodiesAll.
-- `ResponseBodyTruncated` (`bool`)
-- `ResponseBodyCaptured` (`bool`)
+- `ResponseBodyId` (`string`) — ResponseBodyId names the response body; read it with CloudBrowser.ReadNetworkBody. Empty when body capture did not apply to this exchange — see NetworkCaptureOptions.Bodies.
+- `ResponseBodySize` (`int64`) — ResponseBodySize is the number of bytes kept for the response body, after content decoding.
+- `ResponseBodyTruncated` (`bool`) — ResponseBodyTruncated reports that the kept body is shorter than the one the page received: it hit the per-body cap or the load ended early.
 - `EncodedDataLength` (`int64`)
 - `Error` (`string`) — Error is the net error name (e.g. "net::ERR_ABORTED"), empty on success.
 
@@ -3208,6 +3291,23 @@ ScriptLogEntry is one console.* call from a script.
 - `Level` (`string`) — Level is "info", "warning" or "error", from console.log / .warn / .error.
 - `Message` (`string`) — Message holds the logged arguments, already stringified the way console does it.
 - `Timestamp` (`time.Time`) — Timestamp is when the script printed the line, stamped in the browser.
+
+### `SessionUsage`
+
+*struct*
+
+SessionUsage is what a session's browser has consumed since the session started: the CPU time and memory of every process that rendered its pages — main frames, cross-site iframes and the workers they host — including processes that have since exited. Work done on the session's behalf in processes it shares with other sessions is not included.
+
+CloudBrowser.GetUsage reports it while the session runs, and CloudBrowser.StopBrowser returns the final figures, so there is no need to read it right before stopping.
+
+**Fields:**
+- `WallTime` (`float64`) — WallTime is the real time since the session's browser was created, in seconds.
+- `CpuTime` (`float64`) — CpuTime is user plus kernel CPU time in seconds. Only time a thread actually ran on a core counts; waiting and idling do not.
+- `MinMemory` (`int64`) — MinMemory is the least memory the session held once its browser was ready, in bytes. Sampled about once a second.
+- `AverageMemory` (`int64`) — AverageMemory is the memory held, averaged over WallTime, in bytes; AverageMemory * WallTime is the memory-time used. Sampled about once a second, so short spikes count toward the peak but barely toward the average.
+- `PeakMemory` (`int64`) — PeakMemory is the most memory held at any one moment, in bytes.
+- `RenderersUsed` (`int`) — RenderersUsed counts the renderer processes that hosted at least one of the session's frames: one per site its pages and cross-site iframes needed.
+- `FramesCreated` (`int`) — FramesCreated counts the child frames created in the session's pages, whether or not they got a process of their own.
 
 ### `StorageItem`
 

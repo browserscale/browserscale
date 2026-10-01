@@ -1,7 +1,7 @@
 <!--
   url: https://browserscale.cloud/docs/guides/shadow-canvas
   title: Shadow DOM & canvas
-  description: Read across browser security boundaries in a browserscale session: pierce closed shadow roots with __wrc.shadow and read tainted cross-origin canvas pixels with ReadCanvas.
+  description: Read across browser security boundaries in a browserscale session: pierce closed shadow roots and read pixels from tainted cross-origin canvases.
 -->
 
 # Shadow DOM & canvas
@@ -114,8 +114,8 @@ and click the computed viewport coordinate.
 
 ### Waiting on something inside a shadow root
 
-`__wrc.shadow` works inside `Wait`'s JavaScript conditions too. Each
-poll re-evaluates the expression, so you can wait for an element that
+`__wrc.shadow` works inside `Wait`'s JavaScript conditions too. The
+expression is re-checked as the page changes, so you can wait for an element that
 only exists behind the boundary:
 
 **Go:**

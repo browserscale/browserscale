@@ -1,7 +1,7 @@
 <!--
   url: https://browserscale.cloud/docs/guides/frames
   title: Frames & iframes
-  description: browserscale's flat frame model: same-origin and OOPIF frames are uniformly addressable, with offsets exposed on every frame.
+  description: Every frame, same-origin or cross-origin and at any depth, is one frameId. Search all of them in one call, including frames that appear while you wait.
 -->
 
 # Frames & iframes

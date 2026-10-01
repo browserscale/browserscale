@@ -16,7 +16,7 @@
     display: flex;
     flex-direction: column;
   }
-  header {
+  body > header {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -31,7 +31,9 @@
   .dot[data-status="error"] { background: #f85149; }
   .spacer { flex: 1; }
   .hint { color: #6b7280; }
-  button {
+  /* Scoped to the header: the DevTools pane brings its own buttons, and an
+     unscoped rule here would outrank its styles. */
+  body > header button {
     font: inherit;
     color: #e6e8eb;
     background: #171b21;
@@ -40,17 +42,53 @@
     padding: 4px 10px;
     cursor: pointer;
   }
-  button:hover { background: #1f242c; }
+  body > header button:hover { background: #1f242c; }
+  body > header button[aria-pressed="true"] { background: #2b313a; border-color: #3b4350; }
+  body > header button[hidden] { display: none; }
+
+  body > main {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
 
   /* The container owns keyboard focus: key events are read here and forwarded,
      so it must be focusable and must not show a focus ring around the video. */
   #stage {
     flex: 1;
     position: relative;
+    min-width: 0;
     min-height: 0;
     outline: none;
   }
-  video {
+  #stage[data-picking] video { cursor: crosshair; }
+
+  #devtools {
+    position: relative;
+    flex: none;
+    width: 460px;
+    max-width: 75vw;
+    border-left: 1px solid #20242b;
+    background: #fff;
+    color-scheme: light;
+    --bsd-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --bsd-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  #devtools[hidden] { display: none; }
+  #devtools-root { position: absolute; inset: 0; }
+  #devtools-resize {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -4px;
+    width: 8px;
+    z-index: 2;
+    cursor: ew-resize;
+    touch-action: none;
+  }
+  #devtools-resize:hover, #devtools-resize[data-dragging] { background: rgba(47, 129, 247, .35); }
+  #devtools-error { padding: 16px; color: #b91c1c; font-size: 13px; }
+  #stage video {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -86,14 +124,22 @@
   <span class="id">{{.SessionID}}</span>
   <span class="spacer"></span>
   <span class="hint" id="hint">Click the picture to type into it</span>
+  <button id="inspect" type="button" aria-pressed="false" title="Pick an element on the page (Ctrl+Shift+C)" hidden>Inspect</button>
+  <button id="devtools-toggle" type="button" aria-pressed="false" title="DevTools (Ctrl+.)">DevTools</button>
   <button id="fullscreen" type="button">Fullscreen</button>
 </header>
 
-<!-- tabindex makes the stage focusable so it can receive key events. -->
-<div id="stage" tabindex="0">
-  <video id="video" autoplay playsinline muted></video>
-  <div id="overlay"><div><strong id="overlay-title">Connecting…</strong><span id="overlay-detail"></span></div></div>
-</div>
+<main>
+  <!-- tabindex makes the stage focusable so it can receive key events. -->
+  <div id="stage" tabindex="0">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="overlay"><div><strong id="overlay-title">Connecting…</strong><span id="overlay-detail"></span></div></div>
+  </div>
+  <aside id="devtools" hidden>
+    <div id="devtools-resize" role="separator" aria-orientation="vertical" aria-label="Resize DevTools"></div>
+    <div id="devtools-root"></div>
+  </aside>
+</main>
 
 <script>
   // html/template renders these as JSON literals in a script context, quotes

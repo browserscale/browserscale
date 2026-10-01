@@ -1,6 +1,7 @@
 // Package viewer serves the local page that `browserscale view` opens: a
-// loopback HTTP server that hands the browser the stream widget and answers the
-// handful of signalling calls the widget needs.
+// loopback HTTP server that hands the browser the stream widget and DevTools,
+// answers the handful of signalling calls the widget needs, and carries the
+// DevTools pane's calls to the session.
 //
 // The split is the point. WebRTC media never touches this process — the page
 // negotiates with the engine and pulls video from the TURN relay directly — so
@@ -28,13 +29,15 @@ import (
 	browserscale "github.com/browserscale/browserscale-go"
 )
 
-//go:embed assets/viewer.html assets/viewer.js assets/widget.js
+//go:embed assets/viewer.html assets/viewer.js assets/widget.js assets/devtools.js assets/devtools.css
 var assets embed.FS
 
 // assets/widget.js is a vendored copy of browserscale-widget's framework-
-// agnostic core (its dist/index.js). It is vendored rather than fetched so the
-// binary works offline and so a `go install` needs no npm; `task widget:sync`
-// refreshes it and CI fails when the two drift.
+// agnostic core (its dist/index.js), and assets/devtools.js and devtools.css
+// are browserscale-devtools' standalone bundle and stylesheet. They are
+// vendored rather than fetched so the binary works offline and so a
+// `go install` needs no npm; `node scripts/sync-assets.mjs` refreshes them from
+// sibling checkouts and `--check` reports drift.
 
 // Options configures a viewer server.
 type Options struct {
@@ -66,6 +69,7 @@ type server struct {
 	token       string
 	interactive bool
 	page        []byte
+	rpc         *rpcBridge
 }
 
 // Serve runs the viewer until ctx is cancelled, then stops the remote encoder.
@@ -84,6 +88,14 @@ func Serve(ctx context.Context, opts Options) error {
 	if s.page, err = renderPage(opts.SessionID, token, opts.Interactive); err != nil {
 		return err
 	}
+
+	rpcCtx, rpcCancel := context.WithCancel(context.Background())
+	defer rpcCancel()
+	b := opts.Browser
+	if s.rpc, err = newRPCBridge(rpcCtx, b.GrpcUrl(), b.SessionId(), b.ApiKey(), s.tokenOK); err != nil {
+		return err
+	}
+	defer s.rpc.Close()
 
 	// Loopback only. This server speaks for an API key, so it has no business
 	// being reachable from the network.
@@ -130,6 +142,7 @@ func Serve(ctx context.Context, opts Options) error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	rpcCancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
 
 	// Stop the encoder on the way out. The page's own teardown races the tab
@@ -152,6 +165,12 @@ func (s *server) routes() http.Handler {
 	// reading our source.
 	mux.HandleFunc("/viewer.js", s.handleAsset("assets/viewer.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("/widget.js", s.handleAsset("assets/widget.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("/devtools.js", s.handleAsset("assets/devtools.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("/devtools.css", s.handleAsset("assets/devtools.css", "text/css; charset=utf-8"))
+
+	// The DevTools pane's session channel. It checks the token itself, since a
+	// WebSocket handshake is a GET and cannot carry the header guard reads.
+	mux.HandleFunc("/ws", s.rpc.handle)
 
 	mux.HandleFunc("/api/ice", s.guard(s.handleIce))
 	mux.HandleFunc("/api/start", s.guard(s.handleStart))

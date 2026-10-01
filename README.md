@@ -320,6 +320,8 @@ What that buys over just opening the panel is authentication. This command holds
 
 Video travels from the browser engine to your browser directly over the relay. It does not pass through the CLI, which is why watching costs nothing in latency and works the same on a slow machine.
 
+**DevTools come along.** The DevTools button, or Ctrl+., opens the inspector the web panel has: the live Elements tree, a Network recording with request and response bodies, a Console and one-off Actions. Inspect, or Ctrl+Shift+C, picks an element on the picture and reveals it in the tree. Its calls go through the CLI like the signalling ones, so the key stays out of the page here too. `-read-only` only holds back mouse and keyboard; the Console and Actions can still change the page.
+
 Ctrl-C stops watching and frees the engine's encoder. The session keeps running.
 
 **Flags**

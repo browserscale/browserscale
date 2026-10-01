@@ -50,7 +50,7 @@ the browser alone, use `+"`browserscale runs stop`"+`.
 	}
 
 	sessionID := rest[0]
-	if err := browserscale.StopBrowser(ctx, f.resolved, sessionID); err != nil {
+	if _, err := browserscale.StopBrowser(ctx, f.resolved, sessionID); err != nil {
 		return err
 	}
 	if *f.asJSON {

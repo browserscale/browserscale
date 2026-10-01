@@ -29,6 +29,9 @@ The window has no address bar or tabs, which needs a Chromium-based browser
 Video goes from the engine to your browser directly over the relay; it does not
 pass through this process.
 
+Ctrl+. opens DevTools beside the picture: Elements, Network, Console and
+Actions, signed by this process like everything else.
+
 For looking at a session without touching it — one an automation is driving,
 where a stray click would change the outcome — use -read-only.
 `)

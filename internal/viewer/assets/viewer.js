@@ -2,7 +2,8 @@
 // adapter alongside the web panel and the widget's own docs: the widget core
 // does the WebRTC and the coordinate maths, and everything session-shaped is
 // reached by asking the CLI process over loopback. No API key is ever in this
-// page — the CLI holds it and signs the calls itself.
+// page — the CLI holds it and signs the calls itself, the DevTools pane's
+// included.
 
 import {
   getOrCreateSharedConnection,
@@ -125,7 +126,8 @@ function fitWindow(v) {
   fitted = true;
   // The extra height covers our header and the window's title bar. The browser
   // clamps this to the screen, so a session larger than the display is fine.
-  window.resizeTo(v.w, v.h + 50);
+  const pane = document.getElementById("devtools");
+  window.resizeTo(v.w + (pane.hidden ? 0 : pane.offsetWidth), v.h + 50);
 }
 
 setStatus("connecting", "Connecting…", "");
@@ -264,6 +266,150 @@ if (!interactive) {
     sendJSON(conn.inputDc, { type: "keyup", key: e.key, code: e.code, modifiers: domModifiers(e) });
   });
 }
+
+// --- DevTools ---------------------------------------------------------------
+
+// The pane is browserscale-devtools' standalone bundle on the SDK's WebSocket
+// transport. It loads on first open, so a plain `view` never pays for it.
+
+const DT_OPEN_KEY = "bs.view.devtools.open";
+const DT_WIDTH_KEY = "bs.view.devtools.width";
+const DT_MIN_WIDTH = 340;
+
+const dtPane = document.getElementById("devtools");
+const dtRoot = document.getElementById("devtools-root");
+const dtToggle = document.getElementById("devtools-toggle");
+const dtResize = document.getElementById("devtools-resize");
+const inspectBtn = document.getElementById("inspect");
+
+const store = {
+  get(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+  },
+};
+
+let devtools = null;
+let dtTab = "elements";
+let picking = false;
+
+function loadDevTools() {
+  if (devtools) return devtools;
+  if (!document.querySelector('link[href="devtools.css"]')) {
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "devtools.css";
+    document.head.appendChild(css);
+  }
+  devtools = import("./devtools.js").then((mod) => {
+    // No API key here: the CLI writes it into every call on its side.
+    const client = mod.createWebSocketBrowser(`ws://${location.host}/ws?t=${encodeURIComponent(token)}`, sessionId, "");
+    const view = mod.mount(dtRoot, {
+      client,
+      active: true,
+      tab: dtTab,
+      onTab: (t) => {
+        dtTab = t;
+        view.update({ tab: t });
+      },
+      onClose: () => setDevTools(false),
+      closeLabel: "Close DevTools (Ctrl+.)",
+    });
+    return { mod, client, view };
+  });
+  devtools.catch((err) => {
+    devtools = null;
+    const p = document.createElement("p");
+    p.id = "devtools-error";
+    p.textContent = `DevTools could not load: ${(err && err.message) || err}`;
+    dtRoot.replaceChildren(p);
+  });
+  return devtools;
+}
+
+function setDevTools(open) {
+  dtPane.hidden = !open;
+  dtToggle.setAttribute("aria-pressed", String(open));
+  inspectBtn.hidden = !open;
+  if (!open) setPicking(false);
+  store.set(DT_OPEN_KEY, open ? "1" : "0");
+  if (open) loadDevTools();
+}
+
+function setPicking(on) {
+  picking = on;
+  inspectBtn.setAttribute("aria-pressed", String(on));
+  if (on) stage.dataset.picking = "";
+  else delete stage.dataset.picking;
+}
+
+dtToggle.addEventListener("click", () => setDevTools(dtPane.hidden));
+inspectBtn.addEventListener("click", () => setPicking(!picking));
+
+// Picking takes the click before the input forwarding sees it: the capture
+// listener on the stage runs ahead of the ones on the video.
+stage.addEventListener("mousedown", async (e) => {
+  if (!picking || e.button !== 0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  setPicking(false);
+  const pt = viewport && toViewportCoords(e, video, viewport);
+  if (!pt) return;
+  const { mod, client, view } = await loadDevTools();
+  const target = await mod.inspectAt(client, pt.x, pt.y);
+  if (!target) return;
+  dtTab = "elements";
+  view.update({ inspect: target, tab: "elements" });
+}, true);
+
+// Shortcuts are read on the window in the capture phase, before the stage
+// forwards keys to the page.
+function shortcut(e) {
+  if (!(e.ctrlKey || e.metaKey)) return null;
+  if (e.key === ".") return "toggle";
+  if (e.shiftKey && e.key.toLowerCase() === "c" && !dtPane.hidden) return "pick";
+  return null;
+}
+window.addEventListener("keydown", (e) => {
+  const action = shortcut(e);
+  if (!action) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.repeat) return;
+  if (action === "toggle") setDevTools(dtPane.hidden);
+  else setPicking(!picking);
+}, true);
+window.addEventListener("keyup", (e) => {
+  if (shortcut(e)) e.stopPropagation();
+}, true);
+
+const savedWidth = Number(store.get(DT_WIDTH_KEY));
+if (savedWidth >= DT_MIN_WIDTH) dtPane.style.width = `${savedWidth}px`;
+
+dtResize.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  dtResize.setPointerCapture(e.pointerId);
+  dtResize.dataset.dragging = "";
+  const right = dtPane.getBoundingClientRect().right;
+  const move = (ev) => {
+    const w = Math.max(DT_MIN_WIDTH, Math.min(right - ev.clientX, window.innerWidth * 0.75));
+    dtPane.style.width = `${Math.round(w)}px`;
+  };
+  const up = () => {
+    dtResize.removeEventListener("pointermove", move);
+    dtResize.removeEventListener("pointerup", up);
+    dtResize.removeEventListener("pointercancel", up);
+    delete dtResize.dataset.dragging;
+    store.set(DT_WIDTH_KEY, String(Math.round(dtPane.getBoundingClientRect().width)));
+  };
+  dtResize.addEventListener("pointermove", move);
+  dtResize.addEventListener("pointerup", up);
+  dtResize.addEventListener("pointercancel", up);
+});
+
+setDevTools(store.get(DT_OPEN_KEY) === "1");
 
 // --- Fullscreen -----------------------------------------------------------
 

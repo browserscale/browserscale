@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Launcher for the npm distribution. This directory is the source template,
-// not a publishable package — scripts/build-npm.mjs stages the real one into
+// not a publishable package: scripts/build-npm.mjs stages the real one into
 // dist/npm/ with the release version filled in.
 //
-// The real CLI is a Go binary; this package
-// only carries the per-platform packages as optionalDependencies, so npm picks
-// the matching one via their "os"/"cpu" fields and skips the rest. That keeps
-// the install free of postinstall scripts and network fetches, which means it
-// also works under `npm ci --ignore-scripts` and in offline caches.
+// The command and Studio are native programs; this package only carries the
+// per-platform packages as optionalDependencies, so npm picks the matching
+// one via their "os"/"cpu" fields and skips the rest. That keeps the install
+// free of postinstall scripts and network fetches, which means it also works
+// under `npm ci --ignore-scripts` and in offline caches.
 "use strict";
 
 const { spawnSync } = require("node:child_process");
@@ -35,8 +35,8 @@ if (!binary) {
     `browserscale: no binary for ${process.platform}-${process.arch} (looked for ${pkg}).\n\n` +
       `If this platform should be supported, the install probably skipped optional\n` +
       `dependencies. Reinstall without --no-optional / --omit=optional.\n\n` +
-      `Otherwise install from source with a Go toolchain:\n` +
-      `  go install github.com/browserscale/browserscale@latest\n`
+      `Otherwise download Studio for your system from\n` +
+      `  https://github.com/browserscale/browserscale/releases/latest\n`
   );
   process.exit(1);
 }
@@ -46,6 +46,6 @@ if (result.error) {
   process.stderr.write(`browserscale: could not run ${binary}: ${result.error.message}\n`);
   process.exit(1);
 }
-// A signalled child reports a null status; Ctrl+C during `browserscale dev`
+// A signalled child reports a null status; Ctrl+C during `browserscale run`
 // lands here because the terminal signals the whole process group.
 process.exit(result.status === null ? 1 : result.status);

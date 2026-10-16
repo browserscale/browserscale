@@ -1,3 +1,2 @@
-# LF everywhere, whatever core.autocrlf says: gofmt rejects CRLF, and the
-# scaffold templates are embedded into the binary byte for byte.
+# LF everywhere, whatever core.autocrlf says.
 * text=auto eol=lf

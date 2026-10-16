@@ -1,76 +1,92 @@
 name: release
 
+# The programs are built elsewhere and arrive here as a release's assets. This
+# workflow only turns them into npm packages and publishes them, from this
+# repository: npm's trusted publishers are bound to it and to this file's
+# name, and package.json's repository.url has to match it.
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish to npm, e.g. v0.4.0"
+        required: true
 
 permissions:
-  contents: write
+  contents: read
   # npm trusted publishing: the registry accepts this run's OIDC identity in
   # place of a token, and signs provenance against it.
   id-token: write
 
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+
 jobs:
-  release:
+  npm:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          # GoReleaser builds the changelog from history, so a shallow clone
-          # is not enough.
-          fetch-depth: 0
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-          check-latest: true
-
+      # Trusted publishing needs Node 22.14 or newer and npm 11.5.1 or newer.
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      # Builds every target and uploads the GitHub release. `go install` needs
-      # none of this.
-      - name: GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: "~> v2"
-          args: release --clean
+      - name: Download the release's archives
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets \
+            --pattern 'browserscale_*' --pattern 'checksums.txt'
+          cd assets
+          sha256sum --check --ignore-missing checksums.txt
 
       - name: Stage npm packages
-        run: node scripts/build-npm.mjs --version "${GITHUB_REF_NAME#v}" --dist dist --out dist/npm
+        run: node scripts/build-npm.mjs --version "${TAG#v}" --assets assets --out dist/npm
 
-      # Publishing uses npm trusted publishing (OIDC), never a stored token.
-      # A trusted publisher can only be attached to a package that already
-      # exists, so the first release of each package is published by hand and
-      # this stays off until every package trusts this workflow. Turn it on
-      # with the repository variable NPM_TRUSTED_PUBLISHING=true.
-      #
-      # Trusted publishing needs npm 11.5.1 or newer; Node 22 ships older.
+      # Installing them is the check: the wrapper finds its binary through
+      # require.resolve, which is the first thing a user meets. Tarballs, not
+      # directories: npm links a directory install, and the launcher then
+      # resolves from the source tree.
+      - name: Install the staged packages and run the command
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/npm-smoke"
+          cd "$RUNNER_TEMP/npm-smoke"
+          npm pack "$GITHUB_WORKSPACE/dist/npm/@browserscale/cli-linux-x64"
+          npm pack "$GITHUB_WORKSPACE/dist/npm/browserscale"
+          npm install -g ./*.tgz
+          browserscale version
+          browserscale help >/dev/null
+
       - name: Update npm
         if: vars.NPM_TRUSTED_PUBLISHING == 'true'
         run: npm install -g npm@latest
 
       # Platform packages go first: the wrapper pins them exactly, so
       # publishing it first would leave a window where installs fail. A version
-      # that is already on the registry is skipped, so a rerun, or a release
-      # whose packages were published by hand, finishes instead of failing.
+      # already on the registry is skipped, so a rerun finishes instead of
+      # failing. A prerelease goes to the "next" tag, so `npm i -g browserscale`
+      # keeps installing the latest stable one.
       - name: Publish npm packages
         if: vars.NPM_TRUSTED_PUBLISHING == 'true'
         run: |
           set -euo pipefail
+          version="${TAG#v}"
+          tag=latest
+          case "$version" in *-*) tag=next ;; esac
           publish() {
             name="$(node -p "require('./$1/package.json').name")"
-            version="$(node -p "require('./$1/package.json').version")"
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version is already published, skipping"
               return
             fi
-            npm publish "$1" --access public --provenance
+            npm publish "$1" --access public --tag "$tag"
           }
           for pkg in dist/npm/@browserscale/*; do
             publish "$pkg"

@@ -5,15 +5,15 @@
   "scripts": {
     "prepublishOnly": "node -e \"console.error('browserscale: this is the source template, not a publishable package. Run scripts/build-npm.mjs and publish dist/npm/browserscale instead.'); process.exit(1)\""
   },
-  "description": "The command line for browserscale.cloud — scaffold and run cloud browser automation modules",
+  "description": "browserscale studio and its command line: describe the work, get a bot that runs it",
   "keywords": [
     "browserscale",
     "browser-automation",
-    "cli",
-    "cdp",
-    "scraping"
+    "ai-agent",
+    "rpa",
+    "cli"
   ],
-  "homepage": "https://browserscale.cloud",
+  "homepage": "https://browserscale.cloud/studio",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/browserscale/browserscale.git"
@@ -21,7 +21,7 @@
   "bugs": {
     "url": "https://github.com/browserscale/browserscale/issues"
   },
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "bin": {
     "browserscale": "bin/browserscale.js"
   },

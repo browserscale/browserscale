@@ -20,11 +20,11 @@ A desktop app for the web portals and back-office apps that have no API. Studio'
 
 ## Install
 
-Download the installer for your system from the [latest release](https://github.com/browserscale/browserscale/releases/latest):
+Download Studio for your system from the [latest release](https://github.com/browserscale/browserscale/releases/latest):
 
 | | |
 | --- | --- |
-| **Windows** | `browserscale-studio_<version>_windows_<arch>-setup.exe` |
+| **Windows** | `browserscale-studio_<version>_windows_<arch>.exe`, which runs as it is |
 | **macOS** | `browserscale-studio_<version>_darwin_<arch>.dmg` (`arm64` for Apple silicon) |
 | **Linux** | `.deb`, or the `.AppImage` for other distributions |
 

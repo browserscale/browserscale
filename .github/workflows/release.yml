@@ -36,13 +36,14 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Download the release's archives
+      # The archives for macOS and Linux and, for Windows, the two programs.
+      - name: Download the release's programs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets \
-            --pattern 'browserscale_*' --pattern 'checksums.txt'
+            --pattern 'browserscale_*' --pattern 'browserscale-studio_*_windows_*.exe' --pattern 'checksums.txt'
           cd assets
           sha256sum --check --ignore-missing checksums.txt
 

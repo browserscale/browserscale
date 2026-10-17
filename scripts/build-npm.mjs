@@ -5,11 +5,13 @@
 //
 //   node scripts/build-npm.mjs --version 1.2.3 --assets assets [--out dist/npm]
 //
-// --assets holds the release's browserscale_<version>_<goos>_<goarch> archives
-// (.tar.gz, or .zip for Windows), as `gh release download` leaves them. Each
-// carries the command and Studio side by side: browserscale and
-// browserscale-studio, or on macOS the "browserscale studio.app" bundle, which
-// the command finds next to itself.
+// --assets holds the release's files as `gh release download` leaves them:
+// for macOS and Linux the browserscale_<version>_<goos>_<goarch>.tar.gz
+// archives, each with the command and Studio side by side (browserscale and
+// browserscale-studio, or on macOS the "browserscale studio.app" bundle), and
+// for Windows the two programs themselves, browserscale_<version>_windows_<goarch>.exe
+// and browserscale-studio_<version>_windows_<goarch>.exe. The command finds
+// Studio next to itself.
 //
 // Writes nothing outside --out and publishes nothing. Run it on Linux or
 // macOS: it sets the executable bits, and chmod is a no-op on Windows, so a
@@ -74,40 +76,36 @@ function run(cmd, args) {
   return null;
 }
 
-// unzip on Linux and macOS; Windows' tar (bsdtar) reads zip as well.
 function extract(archive, dir) {
   mkdirSync(dir, { recursive: true });
-  const err = archive.endsWith(".zip")
-    ? (() => {
-        const e = run("unzip", ["-q", "-o", archive, "-d", dir]);
-        return e && e.code === "ENOENT" ? run("tar", ["-xf", archive, "-C", dir]) : e;
-      })()
-    : run("tar", ["-xzf", archive, "-C", dir]);
+  const err = run("tar", ["-xzf", archive, "-C", dir]);
   if (err) fail(`could not extract ${archive}: ${err.message}`);
 }
 
-/** The archive for each target, by its name; every target must have one. */
-function readArchives(dir, version) {
+/** The release files for each target, by their names; every target must have them. */
+function readAssets(dir, version) {
   if (!existsSync(dir)) fail(`${dir} not found: download the release's assets into it first`);
   const names = new Set(readdirSync(dir));
   const found = new Map();
   const missing = [];
   for (const t of TARGETS) {
-    const base = `browserscale_${version}_${t.goos}_${t.goarch}`;
-    const name = [`${base}.tar.gz`, `${base}.zip`].find((n) => names.has(n));
-    if (name) found.set(t, path.join(dir, name));
-    else missing.push(base);
+    const files = t.os === "win32"
+      ? [`browserscale_${version}_windows_${t.goarch}.exe`, `browserscale-studio_${version}_windows_${t.goarch}.exe`]
+      : [`browserscale_${version}_${t.goos}_${t.goarch}.tar.gz`];
+    const absent = files.filter((n) => !names.has(n));
+    if (absent.length === 0) found.set(t, files.map((n) => path.join(dir, n)));
+    else missing.push(...absent);
   }
   if (missing.length > 0) {
     fail(
-      `no archive in ${dir} for: ${missing.join(", ")}\n` +
+      `missing in ${dir}: ${missing.join(", ")}\n` +
         `  (publishing a partial set would leave those platforms with an unusable wrapper)`
     );
   }
   return found;
 }
 
-/** What each platform package carries in bin/, as the archive holds it. */
+/** What each platform package carries in bin/, as the release names it inside an archive or by itself. */
 function contents(t) {
   if (t.os === "win32") return ["browserscale.exe", "browserscale-studio.exe"];
   if (t.os === "darwin") return ["browserscale", BUNDLE];
@@ -134,18 +132,24 @@ function writeJSON(file, value) {
   writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
 }
 
-function buildPlatformPackage(t, archive, version, outDir, scratch) {
+function buildPlatformPackage(t, files, version, outDir, scratch) {
   const name = `cli-${t.os}-${t.cpu}`;
   const dir = path.join(outDir, SCOPE, name);
   const bin = path.join(dir, "bin");
   mkdirSync(bin, { recursive: true });
 
-  const unpacked = path.join(scratch, name);
-  extract(archive, unpacked);
-  for (const entry of contents(t)) {
-    const from = path.join(unpacked, entry);
-    if (!existsSync(from)) fail(`${path.basename(archive)} has no ${entry}`);
-    cpSync(from, path.join(bin, entry), { recursive: true });
+  if (t.os === "win32") {
+    // The programs themselves, in contents' order, under their own names.
+    contents(t).forEach((entry, i) => copyFileSync(files[i], path.join(bin, entry)));
+  } else {
+    const [archive] = files;
+    const unpacked = path.join(scratch, name);
+    extract(archive, unpacked);
+    for (const entry of contents(t)) {
+      const from = path.join(unpacked, entry);
+      if (!existsSync(from)) fail(`${path.basename(archive)} has no ${entry}`);
+      cpSync(from, path.join(bin, entry), { recursive: true });
+    }
   }
   // npm keeps the mode from the tarball, so the bits have to be set here.
   const programs = contents(t).flatMap((e) =>
@@ -190,14 +194,14 @@ function buildWrapperPackage(version, outDir) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const archives = readArchives(args.assets, args.version);
+const assets = readAssets(args.assets, args.version);
 
 rmSync(args.out, { recursive: true, force: true });
 mkdirSync(args.out, { recursive: true });
 const scratch = mkdtempSync(path.join(os.tmpdir(), "build-npm-"));
 
 try {
-  const platformPackages = TARGETS.map((t) => buildPlatformPackage(t, archives.get(t), args.version, args.out, scratch));
+  const platformPackages = TARGETS.map((t) => buildPlatformPackage(t, assets.get(t), args.version, args.out, scratch));
   buildWrapperPackage(args.version, args.out);
   process.stdout.write(
     `build-npm: staged ${platformPackages.length + 1} packages at version ${args.version} in ${args.out}\n` +

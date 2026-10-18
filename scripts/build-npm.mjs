@@ -112,9 +112,14 @@ function contents(t) {
   return ["browserscale", "browserscale-studio"];
 }
 
+/** A target's package within the scope, by Node's names: what the launcher resolves. */
+function platformName(t) {
+  return `${t.os}-${t.cpu}`;
+}
+
 function packageJSON(t, version) {
   return {
-    name: `${SCOPE}/cli-${t.os}-${t.cpu}`,
+    name: `${SCOPE}/${platformName(t)}`,
     version,
     description: `browserscale studio and its command line for ${t.os} ${t.cpu}`,
     homepage: "https://browserscale.cloud/studio",
@@ -133,7 +138,7 @@ function writeJSON(file, value) {
 }
 
 function buildPlatformPackage(t, files, version, outDir, scratch) {
-  const name = `cli-${t.os}-${t.cpu}`;
+  const name = platformName(t);
   const dir = path.join(outDir, SCOPE, name);
   const bin = path.join(dir, "bin");
   mkdirSync(bin, { recursive: true });
@@ -183,7 +188,7 @@ function buildWrapperPackage(version, outDir) {
   delete manifest.private;
   delete manifest.scripts;
   // Exact pins: a wrapper must never resolve a binary from a different release.
-  manifest.optionalDependencies = Object.fromEntries(TARGETS.map((t) => [`${SCOPE}/cli-${t.os}-${t.cpu}`, version]));
+  manifest.optionalDependencies = Object.fromEntries(TARGETS.map((t) => [`${SCOPE}/${platformName(t)}`, version]));
   writeJSON(path.join(dir, "package.json"), manifest);
   copyFileSync(path.join(WRAPPER_SRC, "bin", "browserscale.js"), path.join(dir, "bin", "browserscale.js"));
   // The repository README, so npm and GitHub never tell two different stories.

@@ -33,11 +33,11 @@
   },
   "preferGlobal": true,
   "optionalDependencies": {
-    "@browserscale/cli-darwin-arm64": "0.0.0-dev",
-    "@browserscale/cli-darwin-x64": "0.0.0-dev",
-    "@browserscale/cli-linux-arm64": "0.0.0-dev",
-    "@browserscale/cli-linux-x64": "0.0.0-dev",
-    "@browserscale/cli-win32-arm64": "0.0.0-dev",
-    "@browserscale/cli-win32-x64": "0.0.0-dev"
+    "@browserscale/darwin-arm64": "0.0.0-dev",
+    "@browserscale/darwin-x64": "0.0.0-dev",
+    "@browserscale/linux-arm64": "0.0.0-dev",
+    "@browserscale/linux-x64": "0.0.0-dev",
+    "@browserscale/win32-arm64": "0.0.0-dev",
+    "@browserscale/win32-x64": "0.0.0-dev"
   }
 }

@@ -14,7 +14,7 @@ const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const pkg = `@browserscale/cli-${process.platform}-${process.arch}`;
+const pkg = `@browserscale/${process.platform}-${process.arch}`;
 const exe = process.platform === "win32" ? "browserscale.exe" : "browserscale";
 
 function resolveBinary() {

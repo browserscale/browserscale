@@ -25,6 +25,7 @@ import process from "node:process";
 // npm matches these against process.platform / process.arch at install time,
 // which is why the package names use Node's spelling and not Go's.
 const TARGETS = [
+  { goos: "darwin", goarch: "amd64", os: "darwin", cpu: "x64" },
   { goos: "darwin", goarch: "arm64", os: "darwin", cpu: "arm64" },
   { goos: "linux", goarch: "amd64", os: "linux", cpu: "x64" },
   { goos: "linux", goarch: "arm64", os: "linux", cpu: "arm64" },

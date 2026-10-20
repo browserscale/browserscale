@@ -30,14 +30,6 @@ function resolveBinary() {
 }
 
 const binary = resolveBinary();
-if (!binary && process.platform === "darwin" && process.arch === "x64") {
-  process.stderr.write(
-    `browserscale: Studio runs on Macs with Apple silicon only.\n\n` +
-      `On an Apple silicon Mac this Node is the Intel build, running under Rosetta:\n` +
-      `install the arm64 Node from https://nodejs.org and then browserscale again.\n`
-  );
-  process.exit(1);
-}
 if (!binary) {
   process.stderr.write(
     `browserscale: no binary for ${process.platform}-${process.arch} (looked for ${pkg}).\n\n` +

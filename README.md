@@ -28,6 +28,8 @@ Download Studio for your system from the [latest release](https://github.com/bro
 | **macOS** | `browserscale-studio_<version>_darwin_<arch>.dmg` (`arm64` for Apple silicon) |
 | **Linux** | `.deb`, or the `.AppImage` for other distributions |
 
+`browserscale-cli_<version>_windows_<arch>.exe` is the command line on its own, for servers and scripts.
+
 Or with npm, on any platform with Node 18 or newer:
 
 ```sh

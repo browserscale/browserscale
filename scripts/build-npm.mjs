@@ -6,10 +6,10 @@
 //   node scripts/build-npm.mjs --version 1.2.3 --assets assets [--out dist/npm]
 //
 // --assets holds the release's files as `gh release download` leaves them:
-// for macOS and Linux the browserscale_<version>_<goos>_<goarch>.tar.gz
+// for macOS and Linux the browserscale-studio_<version>_<goos>_<goarch>.tar.gz
 // archives, each with the command and Studio side by side (browserscale and
 // browserscale-studio, or on macOS the "browserscale studio.app" bundle), and
-// for Windows the two programs themselves, browserscale_<version>_windows_<goarch>.exe
+// for Windows the two programs themselves, browserscale-cli_<version>_windows_<goarch>.exe
 // and browserscale-studio_<version>_windows_<goarch>.exe. The command finds
 // Studio next to itself.
 //
@@ -90,8 +90,8 @@ function readAssets(dir, version) {
   const missing = [];
   for (const t of TARGETS) {
     const files = t.os === "win32"
-      ? [`browserscale_${version}_windows_${t.goarch}.exe`, `browserscale-studio_${version}_windows_${t.goarch}.exe`]
-      : [`browserscale_${version}_${t.goos}_${t.goarch}.tar.gz`];
+      ? [`browserscale-cli_${version}_windows_${t.goarch}.exe`, `browserscale-studio_${version}_windows_${t.goarch}.exe`]
+      : [`browserscale-studio_${version}_${t.goos}_${t.goarch}.tar.gz`];
     const absent = files.filter((n) => !names.has(n));
     if (absent.length === 0) found.set(t, files.map((n) => path.join(dir, n)));
     else missing.push(...absent);

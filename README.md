@@ -50,17 +50,20 @@ The bot builds into one program that runs without Studio and without a model. Br
 
 ## On the command line
 
-The `browserscale` command covers what Studio does, for terminals and scripts. It shares Studio's sign-in, and a run started in one shows up live in the other.
+The `browserscale` command runs what Studio builds, from a terminal, a script or a cron job. It shares Studio's sign-in, and a run started in one shows up live in the other.
 
 ```text
-browserscale open [project]           Studio, at the project
-browserscale run <project>            build, run, follow the log
-browserscale runs <project>           a project's runs; show, stop
-browserscale browsers                 running browsers; stop, live
-browserscale browservm run <session>  a script beside the page
+browserscale run <project>             build the bot, run it, follow its log
+  -set field=value                     a setting for this run only
+  -jobs N -threads N -task name        how much, how many at once, which part
+browserscale runs <project>            its runs; show one with its log, stop
+browserscale projects                  list; new, rename, delete, folder
+browserscale browsers                  running browsers; stop, watch live in Studio
+browserscale browservm run <session>   a script beside the page (early access)
+browserscale login | account           sign in; who you are and the balance
 ```
 
-`browserscale help` lists everything. Without a credential store, as on a Linux server, it reads the key from `BROWSERSCALE_API_KEY`.
+Every command takes `-json`, and `run` exits with 1 when the run failed, so it drops into CI as it is. `browserscale help` lists everything. Without a credential store, as on a Linux server, it reads the key from `BROWSERSCALE_API_KEY`.
 
 ## Questions and bugs
 

@@ -25,7 +25,7 @@ Download Studio for your system from the [latest release](https://github.com/bro
 | | |
 | --- | --- |
 | **Windows** | `browserscale-studio_<version>_windows_<arch>.exe`, which runs as it is |
-| **macOS** | `browserscale-studio_<version>_darwin_<arch>.dmg` (`arm64` for Apple silicon) |
+| **macOS** | `browserscale-studio_<version>_darwin_arm64.dmg`, for Macs with Apple silicon |
 | **Linux** | `.deb`, or the `.AppImage` for other distributions |
 
 Or with npm, on any platform with Node 18 or newer:

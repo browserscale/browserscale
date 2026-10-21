@@ -37,6 +37,15 @@ npm i -g browserscale
 browserscale            # opens Studio
 ```
 
+Or on a Mac with [Homebrew](https://brew.sh):
+
+```sh
+brew install browserscale/tap/browserscale
+browserscale            # opens Studio
+```
+
+To update, run `npm i -g browserscale` again, or `brew update && brew upgrade browserscale`. Studio tells you when there is a new version, with the command for how you installed it.
+
 Building bots needs [Go](https://go.dev/dl/) on the same machine. On Linux, Studio needs GTK 4 and WebKitGTK 6.0, as on Ubuntu 24.04 or Debian 13 and newer.
 
 ## How it works

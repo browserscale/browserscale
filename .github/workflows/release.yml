@@ -3,14 +3,15 @@ name: release
 # The programs are built elsewhere and arrive here as a release's assets. This
 # workflow only turns them into npm packages and publishes them, from this
 # repository: npm's trusted publishers are bound to it and to this file's
-# name, and package.json's repository.url has to match it.
+# name, and package.json's repository.url has to match it. A stable release
+# also moves the Homebrew formula in browserscale/homebrew-tap to it.
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to publish to npm, e.g. v0.4.0"
+        description: "Release tag to publish to npm and Homebrew, e.g. v0.4.0"
         required: true
 
 permissions:
@@ -94,3 +95,58 @@ jobs:
             publish "$pkg"
           done
           publish dist/npm/browserscale
+
+  # Homebrew has no channel like npm's "next", so a prerelease leaves the
+  # formula where it is. Without RELEASE_APP_ID the job is skipped.
+  homebrew:
+    if: ${{ !contains(github.event.release.tag_name || inputs.tag, '-') && vars.RELEASE_APP_ID != '' }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the release's checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets --pattern checksums.txt
+
+      # The release app, installed on homebrew-tap with contents: write. This
+      # workflow's own token only reaches this repository.
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: browserscale
+          repositories: homebrew-tap
+
+      - uses: actions/checkout@v4
+        with:
+          repository: browserscale/homebrew-tap
+          token: ${{ steps.app.outputs.token }}
+          path: tap
+
+      - name: Write the formula
+        run: |
+          set -euo pipefail
+          node scripts/build-formula.mjs --version "$TAG" --checksums assets/checksums.txt --out tap/Formula/browserscale.rb
+          ruby -c tap/Formula/browserscale.rb
+
+      # A rerun with the formula already at this release changes nothing.
+      - name: Push to the tap
+        working-directory: tap
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP: ${{ steps.app.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "Formula/browserscale.rb is already at ${TAG#v}"
+            exit 0
+          fi
+          id="$(gh api "/users/${APP}[bot]" --jq .id)"
+          git config user.name "${APP}[bot]"
+          git config user.email "${id}+${APP}[bot]@users.noreply.github.com"
+          git commit -qam "browserscale ${TAG#v}"
+          git push

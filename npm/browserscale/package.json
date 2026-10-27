@@ -5,7 +5,7 @@
   "scripts": {
     "prepublishOnly": "node -e \"console.error('browserscale: this is the source template, not a publishable package. Run scripts/build-npm.mjs and publish dist/npm/browserscale instead.'); process.exit(1)\""
   },
-  "description": "browserscale studio and its command line: describe the work, get a bot that runs it",
+  "description": "browserscale studio and its command line: describe the work, get an automation that runs it",
   "keywords": [
     "browserscale",
     "browser-automation",

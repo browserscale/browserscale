@@ -4,7 +4,7 @@
 
 # browserscale studio
 
-**Describe the work. Get a bot that runs it.**
+**Describe the work. Get an automation that runs it.**
 
 A desktop app for the web portals and back-office apps that have no API. Studio's agent walks the site with you in a live cloud browser, writes the automation as code your team can review, and runs it across as many browsers as the work needs.
 
@@ -62,25 +62,25 @@ browserscale            # opens Studio
 
 To update, run `npm i -g browserscale` again, or `brew update && brew upgrade browserscale`. Studio tells you when there is a new version, with the command for how you installed it.
 
-Building bots needs [Go](https://go.dev/dl/) on the same machine. On Linux, Studio needs GTK 4 and WebKitGTK 6.0, as on Ubuntu 24.04 or Debian 13 and newer.
+Building automations needs [Go](https://go.dev/dl/) on the same machine. On Linux, Studio needs GTK 4 and WebKitGTK 6.0, as on Ubuntu 24.04 or Debian 13 and newer.
 
 ## How it works
 
 | | |
 | --- | --- |
-| **Brief** | You and the agent settle what the bot does on which site, what it needs from you, and which outcomes count as success. |
+| **Brief** | You and the agent settle what the automation does on which site, what it needs from you, and which outcomes count as success. |
 | **Explore** | The agent goes through the site in a live browser and maps its screens and flows as it goes. You see each step and can take over. |
-| **Build** | The agent writes the bot as a plain Go module, runs it, reads how each job ended, and fixes what broke. |
+| **Build** | The agent writes the automation as a plain Go module, runs it, reads how each job ended, and fixes what broke. |
 | **Run** | Runs start as many jobs as the work has, each in its own browser, and the agent reads the results with you. |
 
-The bot builds into one program that runs without Studio and without a model. Bring your own model: Anthropic, OpenAI, Gemini or any OpenAI-compatible server, each with your own key.
+The automation builds into one program that runs without Studio and without a model. Bring your own model: Anthropic, OpenAI, Gemini or any OpenAI-compatible server, each with your own key.
 
 ## On the command line
 
 The `browserscale` command runs what Studio builds, from a terminal, a script or a cron job. It shares Studio's sign-in, and a run started in one shows up live in the other.
 
 ```text
-browserscale run <project>             build the bot, run it, follow its log
+browserscale run <project>             build the automation, run it, follow its log
   -set field=value                     a setting for this run only
   -jobs N -threads N -task name        how much, how many at once, which part
 browserscale runs <project>            its runs; show one with its log, stop
@@ -98,4 +98,4 @@ Ask on [Discord](https://discord.gg/SfE9C9K28D) or open an [issue](https://githu
 
 ## License
 
-Studio and the `browserscale` command are free to use, under the terms in [LICENSE](https://github.com/browserscale/browserscale/blob/main/LICENSE). They are not open source. The bots you build with them are yours.
+Studio and the `browserscale` command are free to use, under the terms in [LICENSE](https://github.com/browserscale/browserscale/blob/main/LICENSE). They are not open source. The automations you build with them are yours.

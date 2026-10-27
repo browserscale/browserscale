@@ -11,6 +11,7 @@ A desktop app for the web portals and back-office apps that have no API. Studio'
 ![Windows](https://img.shields.io/badge/Windows-0a0a0a?style=flat-square&logo=windows)
 ![macOS](https://img.shields.io/badge/macOS-0a0a0a?style=flat-square&logo=apple)
 ![Linux](https://img.shields.io/badge/Linux-0a0a0a?style=flat-square&logo=linux&logoColor=white)
+[![Stable](https://img.shields.io/npm/v/browserscale?style=flat-square&label=stable&color=0a0a0a)](https://github.com/browserscale/browserscale/releases/latest)
 
 [browserscale.cloud/studio](https://browserscale.cloud/studio) · [Guide](https://browserscale.cloud/docs/guides/studio) · [Discord](https://discord.gg/SfE9C9K28D)
 
@@ -19,6 +20,14 @@ A desktop app for the web portals and back-office apps that have no API. Studio'
 ---
 
 ## Install
+
+<!-- versions:start -->
+| | Version | Released | npm |
+| --- | --- | --- | --- |
+| **Stable** | [0.4.9](https://github.com/browserscale/browserscale/releases/tag/v0.4.9) | 2026-10-26 | `npm i -g browserscale` |
+<!-- versions:end -->
+
+A prerelease tries out what comes next. Studio offers you prereleases only while you run one yourself.
 
 Download Studio for your system from the [latest release](https://github.com/browserscale/browserscale/releases/latest):
 
@@ -29,6 +38,13 @@ Download Studio for your system from the [latest release](https://github.com/bro
 | **Linux** | `.deb`, or the `.AppImage` for other distributions |
 
 `browserscale-cli_<version>_windows_<arch>.exe` is the command line on its own, for servers and scripts.
+
+Studio on Windows needs Microsoft's WebView2 Runtime. Windows 10 and 11 have it; Windows Server comes without it, and Studio offers to install it on its first start. To install it beforehand, in PowerShell:
+
+```powershell
+Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "$env:TEMP\MicrosoftEdgeWebview2Setup.exe"
+Start-Process "$env:TEMP\MicrosoftEdgeWebview2Setup.exe" -ArgumentList "/silent /install" -Wait
+```
 
 Or with npm, on any platform with Node 18 or newer:
 

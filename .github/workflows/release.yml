@@ -4,7 +4,8 @@ name: release
 # workflow only turns them into npm packages and publishes them, from this
 # repository: npm's trusted publishers are bound to it and to this file's
 # name, and package.json's repository.url has to match it. A stable release
-# also moves the Homebrew formula in browserscale/homebrew-tap to it.
+# also moves the Homebrew formula in browserscale/homebrew-tap to it, and
+# every release brings the versions in README.md up to date.
 on:
   release:
     types: [published]
@@ -150,3 +151,40 @@ jobs:
           git config user.email "${id}+${APP}[bot]@users.noreply.github.com"
           git commit -qam "browserscale ${TAG#v}"
           git push
+
+  # The versions block in README.md: the newest stable release, and the newest
+  # prerelease while it is ahead of it. Drafts never show, since only
+  # publishing one starts this workflow. One run at a time, each from the
+  # newest main, so two releases close together don't push over each other.
+  readme:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: readme
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Write the versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 200 --json tagName,publishedAt > "$RUNNER_TEMP/releases.json"
+          node scripts/update-readme.mjs --releases "$RUNNER_TEMP/releases.json" --readme README.md
+
+      - name: Push to main
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "README.md is already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "README: browserscale studio ${TAG#v}"
+          git push origin HEAD:main

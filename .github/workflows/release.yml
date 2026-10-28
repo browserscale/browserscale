@@ -50,6 +50,17 @@ jobs:
           cd assets
           sha256sum --check --ignore-missing checksums.txt
 
+      # The wrapper ships README.md, and npm shows a version's README for good.
+      # The checkout is the tag, whose README still names the release before
+      # this one; the readme job only updates main once this one is out.
+      - name: Write the versions into the packaged README
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 200 --json tagName,publishedAt > "$RUNNER_TEMP/releases.json"
+          node scripts/update-readme.mjs --releases "$RUNNER_TEMP/releases.json" --readme README.md
+
       - name: Stage npm packages
         run: node scripts/build-npm.mjs --version "${TAG#v}" --assets assets --out dist/npm
 

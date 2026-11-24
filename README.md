@@ -24,7 +24,7 @@ A desktop app for the web portals and back-office apps that have no API. Studio'
 <!-- versions:start -->
 | | Version | Released | npm |
 | --- | --- | --- | --- |
-| **Stable** | [0.5.2](https://github.com/browserscale/browserscale/releases/tag/v0.5.2) | 2026-11-17 | `npm i -g browserscale` |
+| **Stable** | [0.5.3](https://github.com/browserscale/browserscale/releases/tag/v0.5.3) | 2026-11-24 | `npm i -g browserscale` |
 <!-- versions:end -->
 
 A prerelease tries out what comes next. Studio offers you prereleases only while you run one yourself.
